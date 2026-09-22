@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notetaker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="logo">🎙️</span> Notetaker</div>
+    <div class="side-actions">
+      <button class="btn primary wide" id="btn-record">● Record a meeting</button>
+      <button class="btn wide" id="btn-upload">⬆ Upload a recording</button>
+      <input type="file" id="file-input" accept="audio/*,video/*,.m4a,.mp3,.wav,.ogg,.webm,.mp4,.mov,.mkv,.flac,.opus" hidden>
+    </div>
+    <input class="search" id="search" type="search" placeholder="Search meetings…">
+    <nav class="list" id="list"></nav>
+    <div class="side-foot">
+      <button class="link" id="btn-settings">⚙ Settings</button>
+      <span class="ai-status" id="ai-status"></span>
+    </div>
+  </aside>
+
+  <main class="main" id="main"></main>
+</div>
+
+<!-- Record dialog -->
+<dialog id="dlg-record">
+  <form method="dialog" class="dlg">
+    <h2>Record a meeting</h2>
+    <label class="field">Title <span class="hint">(optional — the AI will name it)</span>
+      <input name="title" placeholder="e.g. Call with Acme">
+    </label>
+    <fieldset class="choice">
+      <label><input type="radio" name="mode" value="call" checked>
+        <b>A call in another tab</b><span>Google Meet, Zoom, Teams in the browser. You'll pick the tab and share its audio; your microphone is recorded separately, so the transcript knows what you said.</span></label>
+      <label><input type="radio" name="mode" value="mic">
+        <b>In the room</b><span>Microphone only — a meeting around a table, a voice memo.</span></label>
+    </fieldset>
+    <div class="row2">
+      <label class="field">Kind of meeting <select name="template" id="rec-template"></select></label>
+      <label class="field">Language <select name="language"><option value="auto">Detect</option><option value="ru">Русский</option><option value="en">English</option></select></label>
+    </div>
+    <div class="consent">
+      <label><input type="checkbox" name="consent" required> I'll tell everyone this meeting is recorded.</label>
+      <div class="consent-line">Say it or paste in the chat: <code id="consent-text">Heads-up: I'm recording this call with Uno Notetaker to take notes.</code> <button type="button" class="link" id="copy-consent">Copy</button></div>
+    </div>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn" formnovalidate>Cancel</button>
+      <button value="ok" class="btn primary">Start recording</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Upload dialog -->
+<dialog id="dlg-upload">
+  <form method="dialog" class="dlg">
+    <h2>Upload a recording</h2>
+    <p class="muted" id="upload-name"></p>
+    <label class="field">Title <span class="hint">(optional)</span><input name="title"></label>
+    <div class="row2">
+      <label class="field">Kind of meeting <select name="template" id="up-template"></select></label>
+      <label class="field">Language <select name="language"><option value="auto">Detect</option><option value="ru">Русский</option><option value="en">English</option></select></label>
+    </div>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn" formnovalidate>Cancel</button>
+      <button value="ok" class="btn primary">Transcribe</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Settings -->
+<dialog id="dlg-settings">
+  <form method="dialog" class="dlg wide-dlg" id="settings-form">
+    <h2>Settings</h2>
+    <h3>AI provider</h3>
+    <fieldset class="choice">
+      <label><input type="radio" name="provider" value="uno">
+        <b>Uno AI</b><span id="uno-provider-note">Works out of the box on your Uno computer — no keys. Usage is billed to your Uno AI balance.</span></label>
+      <label><input type="radio" name="provider" value="custom">
+        <b>Another provider</b><span>Any OpenAI-compatible endpoint: OpenAI, OpenRouter, a local server.</span></label>
+    </fieldset>
+    <div class="custom-fields">
+      <label class="field">Endpoint <input name="custom_base_url" placeholder="https://api.openai.com/v1"></label>
+      <label class="field">API key <input name="custom_api_key" type="password" autocomplete="off" placeholder="sk-…"></label>
+    </div>
+    <label class="field">Notes model
+      <input name="model" list="models" placeholder="deepseek/deepseek-v3.2">
+      <datalist id="models"></datalist>
+    </label>
+    <h3>Speech-to-text</h3>
+    <fieldset class="choice">
+      <label><input type="radio" name="stt" value="provider">
+        <b>Whisper via the AI provider</b><span>Fast and accurate. About $0.03 per hour of audio on Uno AI.</span></label>
+      <label><input type="radio" name="stt" value="local">
+        <b>On this computer</b><span>Free and private, slower; needs ~0.5–1 GB of free memory while it works.</span></label>
+    </fieldset>
+    <div class="row2">
+      <label class="field">Local model <select name="local_model"><option value="tiny">tiny — fastest</option><option value="base">base — balanced</option><option value="small">small — most accurate</option></select></label>
+      <label class="field">Whisper model name <input name="stt_model" placeholder="whisper-1"></label>
+    </div>
+    <h3>Defaults</h3>
+    <div class="row2">
+      <label class="field">Speech language <select name="language"><option value="auto">Detect</option><option value="ru">Русский</option><option value="en">English</option></select></label>
+      <label class="field">Notes language <select name="notes_language"><option value="auto">Same as the meeting</option><option value="ru">Русский</option><option value="en">English</option></select></label>
+    </div>
+    <label class="field">Kind of meeting <select name="template" id="set-template"></select></label>
+    <div class="test-out" id="test-out"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn" id="btn-test">Test connection</button>
+      <span class="grow"></span>
+      <button value="cancel" class="btn" formnovalidate>Close</button>
+      <button value="ok" class="btn primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notetaker — sign in</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="login">
+  <form id="f" class="dlg" style="max-width:380px;margin:14vh auto;background:#fff;border:1px solid var(--line);border-radius:16px">
+    <h2>🎙️ Notetaker</h2>
+    <p class="muted" style="margin:0">Enter the password from the app card in Uno Work.</p>
+    <label class="field">Password <input type="password" name="password" autofocus required autocomplete="current-password"></label>
+    <p class="bad" id="err" style="color:var(--bad);margin:0" hidden></p>
+    <button class="btn primary">Sign in</button>
+  </form>
+</main>
+<script>
+document.getElementById("f").onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: e.target.password.value }) });
+  if (r.ok) { location.reload(); return; }
+  const err = document.getElementById("err");
+  err.hidden = false;
+  err.textContent = (await r.json().catch(() => ({}))).error || "Could not sign in";
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# Uno Notetaker — meeting notes on your Uno computer.
+#
+#   docker compose up -d --build        → http://<computer>:8430
+#
+# On a Uno computer (Uno Work) it needs no setup: the AI key is the
+# computer's own (read-only), meetings go to ~/Meetings, and the app shows
+# up on the desktop (~/.uno/apps/notetaker.json). ADMIN_PASSWORD is required —
+# the App Store generates it and shows it on the app card.
+name: uno-notetaker
+services:
+  notetaker:
+    build: ./app
+    image: uno-notetaker:0.1.0
+    restart: unless-stopped
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is not set}
+      UNO_APP_URL: ${UNO_APP_URL:-}
+      UNO_LLM_API_KEY: ${UNO_LLM_API_KEY:-}
+      UNO_LLM_BASE_URL: ${UNO_LLM_BASE_URL:-https://api.getuno.xyz/v1}
+    volumes:
+      - ${UNO_HOME:-/home/unowork}/Meetings:/meetings
+      - ${UNO_HOME:-/home/unowork}/.uno:/uno-dot
+      # The Uno Work state dir, read-only: the app reads uno.apiKey from
+      # settings.json on every call (the key may be re-issued). A directory,
+      # not the file: a missing file would be created by docker as a folder
+      # and break Uno Work.
+      - ${UNO_WORK_USERDATA:-/var/lib/uno-work/userdata}:/uno-work:ro
+      - state:/state
+    ports: ["8430:8430"]
+    # A 1-hour meeting peaks ~250 MB (ffmpeg + app); local Whisper base adds ~0.5 GB.
+    mem_limit: 1500m
+volumes:
+  state: {}
