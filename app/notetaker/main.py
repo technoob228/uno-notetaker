@@ -173,7 +173,12 @@ def test_settings():  # sync on purpose: FastAPI runs it in a thread (network ca
             ai.transcribe_remote(p, s, path)
             out["stt"] = {"ok": True, "detail": "speech-to-text is available"}
         except ai.AIError as exc:
-            out["stt"] = {"ok": False, "detail": str(exc)}
+            if exc.status in (401, 403) and p.name == "uno":
+                out["stt"] = {"ok": True, "detail": (
+                    f"Uno AI speech-to-text isn't enabled for this computer's key yet — recordings are "
+                    f"transcribed on this computer (Whisper {s.local_model}) instead")}
+            else:
+                out["stt"] = {"ok": False, "detail": str(exc)}
         finally:
             os.remove(path)
     return out

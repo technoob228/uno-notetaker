@@ -34,9 +34,8 @@ USER_AGENT = f"uno-notetaker/{APP_VERSION}"
 DEFAULT_MODEL = "deepseek/deepseek-v3.2"
 MODEL_CHOICES = [
     ("deepseek/deepseek-v3.2", "DeepSeek V3.2 — fast, cheap (default)"),
-    ("~anthropic/claude-sonnet-latest", "Claude Sonnet — best quality"),
-    ("~anthropic/claude-haiku-latest", "Claude Haiku — quick"),
-    ("qwen/qwen3.5-plus-20260420", "Qwen 3.5 Plus"),
+    ("moonshotai/kimi-k2.6", "Kimi K2.6 — stronger, slower"),
+    ("deepseek/deepseek-v4.1-flash", "DeepSeek V4.1 Flash"),
 ]
 
 

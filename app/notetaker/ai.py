@@ -23,6 +23,10 @@ HTTP = httpx.Client(timeout=httpx.Timeout(180.0, connect=15.0), headers={"User-A
 class AIError(RuntimeError):
     """A message a person can act on (shown in the UI as is)."""
 
+    def __init__(self, message: str, status: int = 0):
+        super().__init__(message)
+        self.status = status
+
 
 def _explain(resp: httpx.Response, what: str) -> AIError:
     try:
@@ -30,11 +34,11 @@ def _explain(resp: httpx.Response, what: str) -> AIError:
         msg = err.get("message") if isinstance(err, dict) else (err or resp.text)
     except ValueError:
         msg = resp.text[:200]
-    if resp.status_code == 401:
-        return AIError(f"{what}: the AI key was not accepted ({msg}). Check Settings → AI provider.")
+    if resp.status_code in (401, 403):
+        return AIError(f"{what}: the AI key was not accepted ({msg}). Check Settings → AI provider.", resp.status_code)
     if resp.status_code == 402:
-        return AIError(f"{what}: not enough AI credits on your Uno account. Top up and press Retry.")
-    return AIError(f"{what} failed (HTTP {resp.status_code}): {msg}")
+        return AIError(f"{what}: not enough AI credits on your Uno account. Top up and press Retry.", 402)
+    return AIError(f"{what} failed (HTTP {resp.status_code}): {msg}", resp.status_code)
 
 
 # ---- speech-to-text --------------------------------------------------------
@@ -96,32 +100,38 @@ _local_model = None
 _local_name = ""
 
 
-def transcribe_local(s: Settings, wav_path: str) -> list[dict]:
-    """faster-whisper on this computer's CPU → segments with timestamps.
-
-    The whole file at once (it does its own voice detection); one job at a
-    time — the model holds 0.3–1 GB of RAM while it works.
-    """
+def _local(s: Settings):
     global _local_model, _local_name
     try:
         from faster_whisper import WhisperModel  # heavy import only when used
     except ImportError as exc:  # pragma: no cover
-        raise AIError("Local Whisper is not installed in this build") from exc
+        raise AIError(f"Local Whisper is not available in this build: {exc}") from exc
     name = s.local_model if s.local_model in ("tiny", "base", "small") else "base"
+    if _local_model is None or _local_name != name:
+        _local_model = WhisperModel(name, device="cpu", compute_type="int8",
+                                    download_root="/state/whisper-models")
+        _local_name = name
+    return _local_model
+
+
+def transcribe_local(s: Settings, path: str) -> str:
+    """faster-whisper on this computer's CPU, one utterance-sized chunk.
+
+    Same chunks as the gateway path (cut at pauses), so a line is one person's
+    utterance whichever engine transcribed it. One chunk at a time: the model
+    holds 0.2–0.9 GB of RAM while it works.
+    """
     with _local_lock:
-        if _local_model is None or _local_name != name:
-            _local_model = WhisperModel(name, device="cpu", compute_type="int8",
-                                        download_root="/state/whisper-models")
-            _local_name = name
-        segments, _info = _local_model.transcribe(
-            wav_path, language=s.language if s.language in ("ru", "en") else None,
-            vad_filter=True, beam_size=1)
-        return [{"start": seg.start, "end": seg.end, "text": seg.text} for seg in segments]
+        model = _local(s)
+        segments, _info = model.transcribe(
+            path, language=s.language if s.language in ("ru", "en") else None,
+            vad_filter=False, beam_size=1, condition_on_previous_text=False)
+        return " ".join(seg.text.strip() for seg in segments)
 
 
 # ---- the notes model -------------------------------------------------------
 
-def chat(p: Provider, s: Settings, messages: list[dict], max_tokens: int = 3000,
+def chat(p: Provider, s: Settings, messages: list[dict], max_tokens: int = 6000,
          temperature: float = 0.2) -> tuple[str, dict]:
     if not p.ready:
         raise AIError("No AI key. On a Uno computer it is set up automatically; "
@@ -138,6 +148,9 @@ def chat(p: Provider, s: Settings, messages: list[dict], max_tokens: int = 3000,
             raise _explain(resp, "AI notes")
         data = resp.json()
         text = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+        if not text.strip():
+            raise AIError(f"{s.model} returned no text (thinking models can spend the whole budget "
+                          "on reasoning). Pick another notes model in Settings and press Retry.")
         return text.strip(), data.get("usage") or {}
     raise AIError("AI notes failed after retries")
 

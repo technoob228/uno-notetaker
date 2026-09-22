@@ -109,6 +109,26 @@ def update(mid: str, **changes) -> dict | None:
         return meta
 
 
+def rename_folder(mid: str, title: str) -> None:
+    """'2026-09-23 10-30 Meeting' → '2026-09-23 10-30 Pilot launch with Oleg'
+    once the AI has named an untitled meeting — so it reads well in Files."""
+    with _lock:
+        path = folder(mid)
+        base = os.path.basename(path)
+        if not re.match(r"^\d{4}-\d{2}-\d{2} \d{2}-\d{2} Meeting( \(\d+\))?$", base):
+            return
+        stem = base[:16]
+        new, n = os.path.join(MEETINGS_DIR, f"{stem} {_safe_title(title)}"), 2
+        while os.path.exists(new):
+            new, n = os.path.join(MEETINGS_DIR, f"{stem} {_safe_title(title)} ({n})"), n + 1
+        try:
+            os.rename(path, new)
+        except OSError:
+            return
+        _index[mid] = new
+        update(mid, folder=os.path.basename(new))
+
+
 def read_text(mid: str, name: str) -> str:
     path = folder(mid)
     if not path:

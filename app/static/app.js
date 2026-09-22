@@ -182,16 +182,17 @@ async function startRecording(mode, title, template, language) {
     }
     tabStream = new MediaStream(at);
   }
-  let micStream;
+  let micStream = null;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch (e) {
-    if (display) display.getTracks().forEach((t) => t.stop());
-    throw new Error("Microphone access was blocked. Allow the microphone for this site and try again.");
+    if (!tabStream) throw new Error("Microphone access was blocked. Allow the microphone for this site and try again.");
+    toast("No microphone — recording the call's sound only.", "bad");
   }
   const meeting = await api("/api/meetings", { method: "POST", body: JSON.stringify({ title, source: "browser", template, language }) });
   const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
   const ctx = new AudioContext();
+  ctx.resume().catch(() => {});
   const tracks = [];
   const addTrack = (name, stream) => {
     const up = new TrackUploader(meeting.id, name);
@@ -202,7 +203,7 @@ async function startRecording(mode, title, template, language) {
     rec.start(5000);
     tracks.push({ name, rec, up, an, stream });
   };
-  addTrack("mic", micStream);
+  if (micStream) addTrack("mic", micStream);
   if (tabStream) addTrack("tab", tabStream);
 
   recording = {
@@ -396,7 +397,7 @@ function renderTab(m, tpl) {
         <button class="link" id="n-edit">Edit</button>
       </div>
       <div class="notes md" id="notes">${m.notes ? renderMd(m.notes) : `<p class="muted">Notes are not written yet.</p>`}</div>
-      ${m.usage && m.usage.model ? `<p class="fine">Notes by ${esc(m.usage.model)} · transcript: ${esc(m.usage.stt === "local" ? "Whisper on this computer" : "Whisper via " + (m.usage.stt === "uno" ? "Uno AI" : "your provider"))}</p>` : ""}`;
+      ${m.usage && m.usage.model ? `<p class="fine">Notes by ${esc(m.usage.model)} · transcript: ${esc(m.usage.stt === "local" ? "Whisper on this computer" : m.usage.stt === "local-fallback" ? "Whisper on this computer (Uno AI speech-to-text is not available for this computer's key yet)" : "Whisper via " + (m.usage.stt === "uno" ? "Uno AI" : "your provider"))}</p>` : ""}`;
     $("#n-regen").onclick = async () => {
       await api(`/api/meetings/${m.id}/regenerate`, { method: "POST", body: JSON.stringify({ template: $("#n-template").value }) });
       openMeeting(m.id);
