@@ -36,7 +36,7 @@ UNO_WORK_SETTINGS = os.environ.get("UNO_WORK_SETTINGS", "/uno-work/settings.json
 UNO_GATEWAY_URL = os.environ.get("UNO_LLM_BASE_URL", "https://api.getuno.xyz/v1").rstrip("/")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 APP_URL = os.environ.get("UNO_APP_URL", "")
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 USER_AGENT = f"uno-notetaker/{APP_VERSION}"
 
 DEFAULT_MODEL = "deepseek/deepseek-v3.2"
