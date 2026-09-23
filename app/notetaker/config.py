@@ -7,12 +7,18 @@ Two places hold state:
   STATE_DIR     a docker volume — settings (may hold an external API key),
                 the cookie secret, share links. Never in the home folder.
 
-The Uno Gateway key is found, in order:
-  1. UNO_LLM_API_KEY in the environment (App Store install mints a key just
-     for this app);
-  2. the Uno Work machine's own gateway key, read-only from its settings
-     file (UNO_WORK_SETTINGS, mounted by compose) — what makes the app work
-     on a Uno computer with zero setup today.
+Where the AI comes from (provider "uno"), first match wins:
+  1. "AI of this computer" — the Uno Work App API (docs/app-sdk.md in
+     uno-work), through the vendored uno_app SDK. The manifest asks for it
+     ("ai" in ~/.uno/apps/notetaker.json); the daemon writes this app's own
+     token to ~/.uno/app-keys/notetaker/, which compose mounts read-only at
+     /run/uno-app (or env UNO_APP_API_URL + UNO_APP_TOKEN). Metered per app,
+     the limit is in Uno Work → Settings → Apps.
+  2. A Uno gateway key, for computers whose Uno Work has no App API yet:
+     UNO_LLM_API_KEY in the environment (App Store install mints a key just
+     for this app), else the machine's own key read-only from the Uno Work
+     settings file (UNO_WORK_SETTINGS, mounted by compose).
+Provider "custom" is any OpenAI-compatible endpoint + key from Settings.
 """
 from __future__ import annotations
 
@@ -21,6 +27,8 @@ import os
 import secrets
 import threading
 from dataclasses import asdict, dataclass, field
+
+from . import uno_app
 
 MEETINGS_DIR = os.environ.get("MEETINGS_DIR", "/meetings")
 STATE_DIR = os.environ.get("STATE_DIR", "/state")
@@ -44,7 +52,7 @@ class Settings:
     provider: str = "uno"              # "uno" | "custom"
     custom_base_url: str = ""
     custom_api_key: str = ""
-    model: str = DEFAULT_MODEL
+    model: str = ""                    # "" = the default: this computer's choice (App API), else DEFAULT_MODEL
     stt: str = "provider"              # "provider" (the AI provider's whisper) | "local"
     stt_model: str = "whisper-1"
     local_model: str = "base"          # tiny | base | small
@@ -129,21 +137,58 @@ def uno_gateway_key() -> tuple[str, str]:
     return "", ""
 
 
+APP_ID = "notetaker"
+
+# How the AI is reached; shown in Settings and the status pill.
+ROUTE_APP = "app"          # the Uno Work App API: "AI of this computer"
+ROUTE_GATEWAY = "gateway"  # a Uno gateway key (older Uno Work, or outside Uno)
+ROUTE_CUSTOM = "custom"    # the person's own OpenAI-compatible provider
+ROUTE_LABELS = {
+    ROUTE_APP: "AI of this computer (Uno Work)",
+    ROUTE_GATEWAY: "Uno gateway key",
+    ROUTE_CUSTOM: "Custom",
+}
+
+
+def app_api_config() -> dict | None:
+    """This app's App API address + token, or None (no waiting: a computer
+    without the App API must fall back at once)."""
+    return uno_app.find_config(app_id=APP_ID)
+
+
 @dataclass
 class Provider:
-    name: str
+    name: str        # "uno" | "custom" — what the person chose
     base_url: str
     api_key: str
     source: str
+    route: str = ROUTE_GATEWAY
 
     @property
     def ready(self) -> bool:
         return bool(self.base_url and self.api_key)
 
+    @property
+    def route_label(self) -> str:
+        return ROUTE_LABELS.get(self.route, self.route)
+
 
 def ai_provider(s: Settings | None = None) -> Provider:
     s = s or load_settings()
     if s.provider == "custom":
-        return Provider("custom", s.custom_base_url.rstrip("/"), s.custom_api_key, "your provider")
+        return Provider("custom", s.custom_base_url.rstrip("/"), s.custom_api_key, "your provider",
+                        ROUTE_CUSTOM)
+    app = app_api_config()
+    if app:
+        return Provider("uno", app["url"], app["token"],
+                        "this computer's AI (limit in Uno Work → Settings → Apps)", ROUTE_APP)
     key, source = uno_gateway_key()
-    return Provider("uno", UNO_GATEWAY_URL, key, source)
+    return Provider("uno", UNO_GATEWAY_URL, key, source, ROUTE_GATEWAY)
+
+
+def notes_model(s: Settings, p: Provider) -> str:
+    """The model to ask for: the person's pick, else the computer's choice
+    ("default" on the App API), else DEFAULT_MODEL."""
+    if s.model:
+        return s.model
+    return "default" if p.route == ROUTE_APP else DEFAULT_MODEL

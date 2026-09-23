@@ -277,7 +277,8 @@ def transcribe(mid: str) -> None:
                     segs, b = _track(mid, wav, total, speaker, tmp, counter)
                 except ai.AIError as exc:
                     # Uno AI keys of a computer are not accepted by the gateway's
-                    # speech-to-text yet (chat works): transcribe here instead of
+                    # speech-to-text yet (chat works), or the Uno Work App API
+                    # refused this app's token: transcribe here instead of
                     # failing the meeting, and say so.
                     if exc.status not in (401, 403) or ai_provider(s).name != "uno":
                         raise
@@ -346,7 +347,7 @@ def summarize(mid: str) -> None:
         title = m.group(1).strip()[:80]
     store.write_text(mid, "notes.md", text + "\n")
     u = meta.get("usage") or {}
-    u.update({"model": s.model, "notes_prompt_tokens": usage.get("prompt_tokens"),
+    u.update({"model": usage.get("model") or s.model, "notes_prompt_tokens": usage.get("prompt_tokens"),
               "notes_completion_tokens": usage.get("completion_tokens"),
               "notes_cost": usage.get("cost"), "notes_seconds": round(time.time() - started, 1)})
     store.update(mid, status="done", progress="", title=title, usage=u)

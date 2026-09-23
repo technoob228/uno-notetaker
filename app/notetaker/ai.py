@@ -1,8 +1,10 @@
 """Talking to the AI: speech-to-text and the notes model.
 
-Both go to one OpenAI-compatible provider — the Uno Gateway by default, or
-whatever endpoint the person set in Settings. Local Whisper (faster-whisper,
-on this computer's CPU) is an opt-in alternative for speech-to-text.
+Both go to one OpenAI-compatible provider (config.ai_provider): the AI of
+this computer (Uno Work App API, via the vendored uno_app SDK), a Uno gateway
+key, or whatever endpoint the person set in Settings. Local Whisper
+(faster-whisper, on this computer's CPU) is an opt-in alternative for
+speech-to-text.
 """
 from __future__ import annotations
 
@@ -14,7 +16,8 @@ import time
 
 import httpx
 
-from .config import USER_AGENT, Provider, Settings
+from . import uno_app
+from .config import ROUTE_APP, USER_AGENT, Provider, Settings, notes_model
 
 log = logging.getLogger("notetaker.ai")
 HTTP = httpx.Client(timeout=httpx.Timeout(180.0, connect=15.0), headers={"User-Agent": USER_AGENT})
@@ -28,17 +31,56 @@ class AIError(RuntimeError):
         self.status = status
 
 
+RETRYABLE = (429, 500, 502, 503, 504)
+
+
+def explain(status: int, code: str, msg: str, what: str) -> AIError:
+    """A person-readable error for a failed AI call (App API or gateway)."""
+    if code == "app_limit_reached":
+        return AIError(f"{what}: this app used its AI limit — raise it in Uno Work → Settings → Apps, "
+                       "then press Retry.", status)
+    if code == "key_limit_reached":
+        return AIError(f"{what}: this app's Uno AI key used its spending limit — raise it on the app's "
+                       "card in Uno Work (Apps), then press Retry.", status)
+    if code == "ai_not_connected":
+        return AIError(f"{what}: this computer is not connected to Uno AI yet — link it in Uno Work, "
+                       "or choose another provider in Settings.", status)
+    if code == "invalid_app_token":
+        return AIError(f"{what}: Uno Work did not accept this app's AI key (it may have been revoked) — "
+                       "check Uno Work → Settings → Apps.", status)
+    if code == "ai_not_allowed":
+        return AIError(f"{what}: this app is not allowed to use the AI of this computer — "
+                       "check Uno Work → Settings → Apps.", status)
+    if status in (401, 403):
+        return AIError(f"{what}: the AI key was not accepted ({msg}). Check Settings → AI provider.", status)
+    if status == 402:
+        return AIError(f"{what}: not enough AI credits on your Uno account. Top up and press Retry.", 402)
+    if status == 0:
+        return AIError(f"{what} failed: {msg}", 0)
+    return AIError(f"{what} failed (HTTP {status}): {msg}", status)
+
+
 def _explain(resp: httpx.Response, what: str) -> AIError:
+    code = ""
     try:
         err = resp.json().get("error")
-        msg = err.get("message") if isinstance(err, dict) else (err or resp.text)
-    except ValueError:
+        if isinstance(err, dict):
+            msg = err.get("message") or resp.text
+            # OpenAI puts the machine code in "code"; the Uno gateway in "type".
+            code = next((c for c in (err.get("code"), err.get("type")) if isinstance(c, str) and c), "")
+        else:
+            msg = err or resp.text
+    except (ValueError, AttributeError):
         msg = resp.text[:200]
-    if resp.status_code in (401, 403):
-        return AIError(f"{what}: the AI key was not accepted ({msg}). Check Settings → AI provider.", resp.status_code)
-    if resp.status_code == 402:
-        return AIError(f"{what}: not enough AI credits on your Uno account. Top up and press Retry.", 402)
-    return AIError(f"{what} failed (HTTP {resp.status_code}): {msg}", resp.status_code)
+    return explain(resp.status_code, code, str(msg), what)
+
+
+def _app_error(exc: uno_app.UnoAppError, what: str) -> AIError:
+    return explain(exc.status, exc.code, exc.message, what)
+
+
+def _app_client(p: Provider) -> uno_app.Client:
+    return uno_app.Client(url=p.base_url, token=p.api_key, timeout=180.0)
 
 
 # ---- speech-to-text --------------------------------------------------------
@@ -67,6 +109,8 @@ def transcribe_remote(p: Provider, s: Settings, path: str) -> dict:
     data = {"model": s.stt_model or "whisper-1", "response_format": fmt}
     if s.language in ("ru", "en"):
         data["language"] = s.language
+    if p.route == ROUTE_APP:
+        return _transcribe_app(p, data, path)
     for attempt in range(5):
         with open(path, "rb") as fh:
             resp = HTTP.post(f"{p.base_url}/audio/transcriptions",
@@ -86,11 +130,38 @@ def transcribe_remote(p: Provider, s: Settings, path: str) -> dict:
             continue
         if resp.status_code != 200:
             raise _explain(resp, "Transcription")
-        body = resp.json()
-        segs = body.get("segments")
-        return {"text": body.get("text", ""),
-                "segments": [{"start": float(x.get("start", 0)), "end": float(x.get("end", 0)),
-                              "text": x.get("text", "")} for x in segs] if isinstance(segs, list) else None}
+        return _segments(resp.json())
+    raise AIError("Transcription failed after retries")
+
+
+def _segments(body: dict) -> dict:
+    segs = body.get("segments")
+    return {"text": body.get("text", ""),
+            "segments": [{"start": float(x.get("start", 0)), "end": float(x.get("end", 0)),
+                          "text": x.get("text", "")} for x in segs] if isinstance(segs, list) else None}
+
+
+def _transcribe_app(p: Provider, data: dict, path: str) -> dict:
+    """Same as the gateway path, through the Uno Work App API."""
+    client = _app_client(p)
+    for attempt in range(5):
+        try:
+            body = client.transcribe_json(path, filename="chunk.ogg", model=data["model"],
+                                          language=data.get("language"),
+                                          response_format=data["response_format"])
+        except uno_app.UnoAppError as exc:
+            log.debug("stt(app) %s attempt=%d → %d %s", os.path.basename(path), attempt, exc.status, exc.code)
+            if exc.status == 400 and data["response_format"] == "verbose_json" \
+                    and "response_format" in exc.message:
+                data["response_format"] = "json"
+                _no_verbose[p.base_url] = time.time()
+                continue
+            transient = exc.status in RETRYABLE or exc.code == "unreachable"
+            if transient and exc.code != "ai_not_connected" and attempt < 3:
+                time.sleep(2 + attempt * 3)
+                continue
+            raise _app_error(exc, "Transcription") from None
+        return _segments(body)
     raise AIError("Transcription failed after retries")
 
 
@@ -136,22 +207,36 @@ def chat(p: Provider, s: Settings, messages: list[dict], max_tokens: int = 6000,
     if not p.ready:
         raise AIError("No AI key. On a Uno computer it is set up automatically; "
                       "elsewhere choose a provider in Settings.")
-    body = {"model": s.model, "messages": messages, "max_tokens": max_tokens,
+    model = notes_model(s, p)
+    body = {"model": model, "messages": messages, "max_tokens": max_tokens,
             "temperature": temperature}
     for attempt in range(3):
-        resp = HTTP.post(f"{p.base_url}/chat/completions",
-                         headers={"Authorization": f"Bearer {p.api_key}"}, json=body)
-        if resp.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-            time.sleep(2 + attempt * 3)
-            continue
-        if resp.status_code != 200:
-            raise _explain(resp, "AI notes")
-        data = resp.json()
+        if p.route == ROUTE_APP:
+            try:
+                data = _app_client(p).chat(body)
+            except uno_app.UnoAppError as exc:
+                transient = exc.status in RETRYABLE or exc.code == "unreachable"
+                if transient and exc.code != "ai_not_connected" and attempt < 2:
+                    time.sleep(2 + attempt * 3)
+                    continue
+                raise _app_error(exc, "AI notes") from None
+        else:
+            resp = HTTP.post(f"{p.base_url}/chat/completions",
+                             headers={"Authorization": f"Bearer {p.api_key}"}, json=body)
+            if resp.status_code in RETRYABLE and attempt < 2:
+                time.sleep(2 + attempt * 3)
+                continue
+            if resp.status_code != 200:
+                raise _explain(resp, "AI notes")
+            data = resp.json()
         text = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+        used = data.get("model") or model
         if not text.strip():
-            raise AIError(f"{s.model} returned no text (thinking models can spend the whole budget "
+            raise AIError(f"{used} returned no text (thinking models can spend the whole budget "
                           "on reasoning). Pick another notes model in Settings and press Retry.")
-        return text.strip(), data.get("usage") or {}
+        usage = dict(data.get("usage") or {})
+        usage["model"] = used
+        return text.strip(), usage
     raise AIError("AI notes failed after retries")
 
 

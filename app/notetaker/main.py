@@ -21,8 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import ai, pipeline, store
-from .config import (ADMIN_PASSWORD, APP_URL, APP_VERSION, MODEL_CHOICES, ai_provider, cookie_secret,
-                     load_settings, save_settings)
+from .config import (ADMIN_PASSWORD, APP_URL, APP_VERSION, MODEL_CHOICES, ROUTE_APP, ai_provider,
+                     cookie_secret, load_settings, notes_model, save_settings)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("notetaker")
@@ -124,7 +124,8 @@ def _state() -> dict:
     p = ai_provider(s)
     return {
         "version": APP_VERSION, "app_url": APP_URL, "settings": s.public(),
-        "provider": {"name": p.name, "ready": p.ready, "source": p.source, "base_url": p.base_url},
+        "provider": {"name": p.name, "ready": p.ready, "source": p.source, "base_url": p.base_url,
+                     "route": p.route, "route_label": p.route_label, "model": notes_model(s, p)},
         "templates": {k: v["name"] for k, v in ai.TEMPLATES.items()},
         "models": MODEL_CHOICES, "password_protected": bool(ADMIN_PASSWORD),
     }
@@ -159,10 +160,11 @@ def test_settings():  # sync on purpose: FastAPI runs it in a thread (network ca
     """Check both halves: the notes model and speech-to-text."""
     s = load_settings()
     p = ai_provider(s)
-    out = {"provider": p.name, "source": p.source}
+    out = {"provider": p.name, "source": p.source, "route": p.route, "route_label": p.route_label}
     try:
-        text, _ = ai.chat(p, s, [{"role": "user", "content": "Reply with the single word OK."}], max_tokens=5)
-        out["notes"] = {"ok": True, "detail": f"{s.model} answered: {text[:20]}"}
+        text, used = ai.chat(p, s, [{"role": "user", "content": "Reply with the single word OK."}], max_tokens=5)
+        out["notes"] = {"ok": True, "detail": f"{used.get('model') or notes_model(s, p)} via {p.route_label} "
+                                              f"answered: {text[:20]}"}
     except ai.AIError as exc:
         out["notes"] = {"ok": False, "detail": str(exc)}
     if s.stt == "local":
@@ -174,9 +176,10 @@ def test_settings():  # sync on purpose: FastAPI runs it in a thread (network ca
             out["stt"] = {"ok": True, "detail": "speech-to-text is available"}
         except ai.AIError as exc:
             if exc.status in (401, 403) and p.name == "uno":
+                why = ("Uno Work did not let this app use speech-to-text" if p.route == ROUTE_APP else
+                       "Uno AI speech-to-text isn't enabled for this computer's key yet")
                 out["stt"] = {"ok": True, "detail": (
-                    f"Uno AI speech-to-text isn't enabled for this computer's key yet — recordings are "
-                    f"transcribed on this computer (Whisper {s.local_model}) instead")}
+                    f"{why} — recordings are transcribed on this computer (Whisper {s.local_model}) instead")}
             else:
                 out["stt"] = {"ok": False, "detail": str(exc)}
         finally:
@@ -386,7 +389,10 @@ def write_manifest() -> None:
     if not os.path.isdir(d):
         return
     manifest = {"name": "Notetaker", "icon": "🎙️", "port": PORT,
-                "description": "Meeting notes: record a call or upload a file — transcript, summary, action items."}
+                "description": "Meeting notes: record a call or upload a file — transcript, summary, action items.",
+                # The AI of this computer (Uno Work App API): chat + speech-to-text, no agent
+                # tasks, at most $10 unless the person raises it in Settings → Apps.
+                "ai": {"chat": True, "tasks": False, "limitUsd": 10}}
     if APP_URL:
         manifest["url"] = APP_URL
     try:
@@ -405,7 +411,7 @@ async def startup():
     pipeline.start_worker()
     write_manifest()
     p = ai_provider()
-    log.info("Uno Notetaker %s on :%d — AI: %s (%s)", APP_VERSION, PORT, p.name,
+    log.info("Uno Notetaker %s on :%d — AI: %s via %s (%s)", APP_VERSION, PORT, p.name, p.route_label,
              p.source if p.ready else "NO KEY")
 
 

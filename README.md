@@ -20,10 +20,23 @@ Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
 
 ## AI
 
-By default everything goes through **Uno AI** (the Uno LLM gateway) with the
-computer's own key — nothing to set up on a Uno computer. Settings → AI provider
-switches to any OpenAI-compatible endpoint + key. Speech-to-text can also run
-**on the computer** (faster-whisper tiny/base/small, CPU) — free, slower.
+By default everything goes through **Uno AI** — nothing to set up on a Uno
+computer. Which way it goes is shown in Settings ("Now in use: …"):
+
+1. **AI of this computer (Uno Work)** — the app's manifest asks for AI
+   (`"ai": {"chat": true, "tasks": false, "limitUsd": 10}`), Uno Work gives the
+   app its own key and the app calls the local **Uno App API** through the
+   vendored SDK (`app/notetaker/uno_app.py`, from uno-work `sdk/python` — keep
+   in sync). Spending is metered per app; the limit ($10 unless the person
+   raises it) is in Uno Work → Settings → Apps. With no notes model chosen,
+   the computer's choice for apps is used (`model: "default"`).
+2. **Uno gateway key** — fallback for computers whose Uno Work has no App API
+   yet: `UNO_LLM_API_KEY` (an App Store key just for this app) or the
+   computer's own key from the Uno Work settings file.
+3. **Custom** — Settings → AI provider: any OpenAI-compatible endpoint + key.
+
+Speech-to-text can also run **on the computer** (faster-whisper
+tiny/base/small, CPU) — free, slower.
 
 | step | default | cost on Uno AI (measured 23.09) |
 |---|---|---|
@@ -31,10 +44,12 @@ switches to any OpenAI-compatible endpoint + key. Speech-to-text can also run
 | notes + naming speakers | `deepseek/deepseek-v3.2` | ~$0.015 per hour of meeting |
 | Ask about the meeting | same model, transcript in context | ~$0.007 per question for a 1-hour meeting |
 
-If the gateway refuses the computer's key for speech-to-text (Uno gateways
-before fishcode `bfcd2d6` accept `unollm_` keys only on chat), the app
-transcribes on the computer with faster-whisper instead and says so — it keeps
-working, at ~20 s per minute of audio on 2 vCPU (base model, ~400 MB RAM peak).
+If Uno AI refuses the key for speech-to-text (401/403 — the App API, or Uno
+gateways before fishcode `bfcd2d6` that accept `unollm_` keys only on chat),
+the app transcribes on the computer with faster-whisper instead and says so —
+it keeps working, at ~20 s per minute of audio on 2 vCPU (base model, ~400 MB
+RAM peak). When the app used its AI limit, the error says to raise it in
+Uno Work → Settings → Apps.
 
 ## Run
 
@@ -42,11 +57,20 @@ working, at ~20 s per minute of audio on 2 vCPU (base model, ~400 MB RAM peak).
 ADMIN_PASSWORD=… docker compose up -d --build     # → :8430
 ```
 
-On a Uno computer the compose file mounts `~/Meetings`, `~/.uno` (the app
-registers itself in `~/.uno/apps/notetaker.json` and appears on the Uno Work
-desktop) and, read-only, the Uno Work state directory to read the computer's
-AI key. `UNO_LLM_API_KEY` in the environment (the App Store can mint a key just
-for this app) takes precedence.
+On a Uno computer the compose file mounts:
+
+- `~/Meetings` → `/meetings`;
+- `~/.uno/apps` → `/uno-dot/apps` — the app writes its manifest
+  `notetaker.json` there (it appears on the Uno Work desktop and asks for AI);
+- `~/.uno/app-keys/notetaker` → `/run/uno-app:ro` — this app's own key
+  (`token` + `api.json`), which the SDK reads; the App API is reached at
+  `host.docker.internal` (`extra_hosts: ["host.docker.internal:host-gateway"]`);
+- read-only, the Uno Work state directory — only for the gateway-key fallback.
+
+**Do not mount the whole `~/.uno`**: it contains the AI keys of every other
+app on the computer. A one-shot `uno-dirs` step creates the two `~/.uno`
+folders owned by the computer's user first — otherwise docker creates a
+missing bind folder as root and Uno Work cannot write the key into it.
 
 Elsewhere: set `UNO_HOME` to a folder for `Meetings`, and either
 `UNO_LLM_API_KEY` or a provider in Settings.
@@ -54,8 +78,10 @@ Elsewhere: set `UNO_HOME` to a folder for `Meetings`, and either
 ## Layout
 
 ```
-app/notetaker/   FastAPI backend: config (keys), audio (ffmpeg), ai (STT/LLM),
-                 pipeline (recording → transcript → notes), store (~/Meetings)
+app/notetaker/   FastAPI backend: config (keys, AI route), audio (ffmpeg), ai (STT/LLM),
+                 pipeline (recording → transcript → notes), store (~/Meetings),
+                 uno_app.py (vendored Uno App SDK)
+app/tests/       unit tests: python3 -m unittest discover -s app/tests
 app/static/      the UI (plain JS, no build)
 testdata/        TTS test meetings (RU/EN) + smoke.py (end-to-end over the API)
 ```

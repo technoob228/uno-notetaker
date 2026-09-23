@@ -73,7 +73,9 @@ async function loadState() {
   STATE = await api("/api/state");
   const p = STATE.provider;
   const el = $("#ai-status");
-  el.textContent = p.ready ? (p.name === "uno" ? "Uno AI ✓" : "Custom AI ✓") : "AI not set up";
+  const pill = { app: "Computer AI ✓", gateway: "Uno AI ✓", custom: "Custom AI ✓" };
+  el.textContent = p.ready ? (pill[p.route] || "AI ✓") : "AI not set up";
+  el.title = p.ready ? `AI: ${p.route_label} — ${p.source}` : "";
   el.className = `ai-status ${p.ready ? "ok" : "bad"}`;
   for (const id of ["#rec-template", "#up-template", "#set-template"]) {
     $(id).innerHTML = Object.entries(STATE.templates).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
@@ -474,8 +476,13 @@ function openSettings() {
   }
   const p = STATE.provider;
   $("#uno-provider-note").textContent = p.name === "uno" && p.ready
-    ? `Works out of the box — using ${p.source}. Usage is billed to your Uno AI balance.`
+    ? (p.route === "app"
+      ? "Works out of the box — uses the AI of this computer. How much this app may spend is set in Uno Work → Settings → Apps."
+      : `Works out of the box — using ${p.source}. Usage is billed to your Uno AI balance.`)
     : "Works out of the box on a Uno computer — no keys. Usage is billed to your Uno AI balance.";
+  $("#ai-route").textContent = p.ready ? `Now in use: ${p.route_label} · notes model ${p.model}` : "Now in use: nothing — the AI is not set up";
+  $("#settings-form").querySelector('[name="model"]').placeholder =
+    p.route === "app" ? "default — this computer's choice" : "deepseek/deepseek-v3.2";
   $("#test-out").innerHTML = "";
   syncCustom();
   $("#dlg-settings").showModal();

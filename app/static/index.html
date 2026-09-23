@@ -83,12 +83,13 @@
       <label><input type="radio" name="provider" value="custom">
         <b>Another provider</b><span>Any OpenAI-compatible endpoint: OpenAI, OpenRouter, a local server.</span></label>
     </fieldset>
+    <p class="fine" id="ai-route"></p>
     <div class="custom-fields">
       <label class="field">Endpoint <input name="custom_base_url" placeholder="https://api.openai.com/v1"></label>
       <label class="field">API key <input name="custom_api_key" type="password" autocomplete="off" placeholder="sk-…"></label>
     </div>
     <label class="field">Notes model
-      <input name="model" list="models" placeholder="deepseek/deepseek-v3.2">
+      <input name="model" list="models" placeholder="deepseek/deepseek-v3.2" title="Empty = the default model">
       <datalist id="models"></datalist>
     </label>
     <h3>Speech-to-text</h3>

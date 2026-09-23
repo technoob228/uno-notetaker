@@ -16,7 +16,8 @@ for d in /meetings /state; do
   mkdir -p "$d"
   [ "$(stat -c %u "$d")" = "$PUID" ] || chown "$PUID:$PGID" "$d"
 done
-# ~/.uno may have been created by docker (as root) for the bind mount.
+# ~/.uno/apps (mounted at /uno-dot/apps; older installs mount all of ~/.uno at
+# /uno-dot) may have been created by docker as root for the bind mount.
 if [ -d /uno-dot ]; then
   [ "$(stat -c %u /uno-dot)" = "0" ] && chown "$PUID:$PGID" /uno-dot
   mkdir -p /uno-dot/apps && chown "$PUID:$PGID" /uno-dot/apps
