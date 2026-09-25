@@ -8,11 +8,13 @@ import html
 import json
 import logging
 import os
+import re
 import secrets
 import subprocess
 import tempfile
 import time
 from collections import defaultdict
+from urllib.parse import quote
 
 import markdown as md
 from fastapi import FastAPI, HTTPException, Request
@@ -20,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import ai, pipeline, store
+from . import actions, ai, deliver, pipeline, store, telegram
 from .config import (ADMIN_PASSWORD, APP_URL, APP_VERSION, MODEL_CHOICES, ROUTE_APP, ai_provider,
                      cookie_secret, load_settings, notes_model, save_settings)
 
@@ -56,7 +58,8 @@ def _session_ok(request: Request) -> bool:
 
 
 _attempts: dict[str, list[float]] = defaultdict(list)
-PUBLIC_PREFIXES = ("/login", "/s/", "/static/", "/healthz", "/favicon")
+PUBLIC_PREFIXES = ("/login", "/s/", "/static/", "/healthz", "/favicon", "/manifest.webmanifest", "/sw.js",
+                   "/widget", "/m/", "/share-target")
 
 
 @app.middleware("http")
@@ -128,6 +131,9 @@ def _state() -> dict:
                      "route": p.route, "route_label": p.route_label, "model": notes_model(s, p)},
         "templates": {k: v["name"] for k, v in ai.TEMPLATES.items()},
         "models": MODEL_CHOICES, "password_protected": bool(ADMIN_PASSWORD),
+        # What this computer offers: the Uno Work App API (Inbox, tasks for the AI) and Telegram.
+        "uno_work": p.route == ROUTE_APP, "inbox": deliver.inbox_available(),
+        "telegram": telegram.status(),
     }
 
 
@@ -139,6 +145,7 @@ async def state():
 @app.put("/api/settings")
 async def put_settings(request: Request):
     body = await request.json()
+    body.pop("telegram_token", None)  # only through /api/telegram/connect (checked with Telegram)
     if body.get("provider") == "custom":
         url = str(body.get("custom_base_url", "")).strip()
         if not url.startswith(("https://", "http://")):
@@ -196,9 +203,21 @@ def _meeting_or_404(mid: str) -> dict:
     return m
 
 
+def _open_actions(mid: str) -> int:
+    return sum(1 for it in store._cached(mid, "notes.md", actions.parse) if not it["done"])
+
+
 @app.get("/api/meetings")
 async def list_meetings(q: str = ""):
-    return {"meetings": store.search(q) if q else store.list_all()}
+    meetings = store.search(q) if q.strip() else store.list_all()
+    for m in meetings:
+        m["open_actions"] = _open_actions(m["id"]) if m["status"] == "done" else 0
+    return {"meetings": meetings}
+
+
+@app.get("/api/actions")
+async def list_actions(done: int = 0):
+    return {"actions": actions.across_meetings(include_done=bool(done))}
 
 
 @app.post("/api/meetings")
@@ -210,7 +229,11 @@ async def create_meeting(request: Request):
     s = load_settings()
     template = body.get("template") if body.get("template") in ai.TEMPLATES else s.template
     lang = body.get("language") if body.get("language") in ("auto", "ru", "en") else s.language
-    return store.create(str(body.get("title", ""))[:120], source, template, lang)
+    tz = body.get("tz_offset")
+    if isinstance(tz, (int, float)) and int(tz) != s.tz_offset_min and -900 <= int(tz) <= 900:
+        save_settings({"tz_offset_min": int(tz)}, internal=True)
+    return store.create(str(body.get("title", ""))[:120], source, template, lang,
+                        int(tz) if isinstance(tz, (int, float)) else None)
 
 
 @app.put("/api/meetings/{mid}/tracks/{track}")
@@ -247,8 +270,10 @@ async def get_meeting(mid: str):
     except ValueError:
         segments = []
     has_audio = os.path.exists(os.path.join(store.folder(mid), "audio", "recording.ogg"))
-    return {**m, "segments": segments, "notes": store.read_text(mid, "notes.md"), "has_audio": has_audio,
-            "path": f"~/Meetings/{m.get('folder', '')}"}
+    notes = store.read_text(mid, "notes.md")
+    return {**m, "segments": segments, "notes": notes, "has_audio": has_audio,
+            "path": f"~/Meetings/{m.get('folder', '')}", "actions": actions.parse(notes),
+            "talk_time": pipeline.talk_time(segments)}
 
 
 @app.put("/api/meetings/{mid}")
@@ -334,6 +359,98 @@ async def unshare(mid: str):
     return {"ok": True}
 
 
+@app.patch("/api/meetings/{mid}/actions/{aid}")
+async def toggle_action(mid: str, aid: str, request: Request):
+    _meeting_or_404(mid)
+    body = await request.json()
+    it = actions.set_done(mid, aid, bool(body.get("done")))
+    if not it:
+        raise HTTPException(404, "No such action item — the notes may have changed. Reload the page.")
+    return it
+
+
+@app.post("/api/meetings/{mid}/actions/{aid}/ai")
+def action_to_ai(mid: str, aid: str):  # sync: the App API call blocks
+    _meeting_or_404(mid)
+    try:
+        return deliver.hand_to_ai(mid, aid)
+    except ai.AIError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@app.post("/api/meetings/{mid}/speakers")
+async def rename_speaker(mid: str, request: Request):
+    m = _meeting_or_404(mid)
+    if m["status"] in ("queued", "transcribing", "summarizing"):
+        raise HTTPException(409, "Wait until processing finishes")
+    body = await request.json()
+    n = pipeline.rename_speaker(mid, str(body.get("from", "")), str(body.get("to", "")))
+    if not n:
+        raise HTTPException(400, "Nothing to rename")
+    return await get_meeting(mid)
+
+
+@app.post("/api/meetings/{mid}/send")
+def send_meeting(mid: str, to: str = "telegram"):  # sync: network calls
+    m = _meeting_or_404(mid)
+    if m["status"] != "done":
+        raise HTTPException(409, "The notes are not ready yet")
+    if to == "inbox":
+        res = deliver.notify_inbox(mid)
+        if res != "sent":
+            raise HTTPException(502, res)
+    else:
+        try:
+            telegram.send_notes(mid)
+        except telegram.TelegramError as exc:
+            raise HTTPException(502, str(exc)) from exc
+    return {"ok": True}
+
+
+@app.get("/api/meetings/{mid}/export")
+async def export(mid: str, what: str = "all"):
+    m = _meeting_or_404(mid)
+    parts = []
+    if what in ("notes", "all"):
+        parts.append(store.read_text(mid, "notes.md").strip())
+    if what in ("transcript", "all"):
+        parts.append(store.read_text(mid, "transcript.md").strip())
+    name = re.sub(r"[^\w\- ]+", "", m.get("title") or "meeting").strip()[:60] or "meeting"
+    suffix = {"notes": " - notes", "transcript": " - transcript"}.get(what, "")
+    fname = f"{(m.get('created_at') or '')[:10]} {name}{suffix}.md"
+    return Response("\n\n---\n\n".join(p for p in parts if p) + "\n", media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"})
+
+
+# ---- telegram --------------------------------------------------------------
+
+@app.get("/api/telegram")
+async def telegram_status():
+    return telegram.status()
+
+
+@app.post("/api/telegram/connect")
+def telegram_connect(body: dict):  # sync: calls Telegram
+    try:
+        return telegram.connect(str(body.get("token", "")))
+    except telegram.TelegramError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/api/telegram")
+async def telegram_disconnect():
+    return telegram.disconnect()
+
+
+@app.post("/api/telegram/test")
+def telegram_test():
+    try:
+        telegram.send("✓ Notetaker can reach you here. Meeting notes will arrive in this chat.")
+    except telegram.TelegramError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
+
+
 @app.delete("/api/meetings/{mid}")
 async def delete_meeting(mid: str):
     m = _meeting_or_404(mid)
@@ -381,6 +498,129 @@ async def shared(token: str):
         "Content-Security-Policy": "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'"})
 
 
+# ---- deep links, Home widget, installable app ----------------------------------
+
+@app.get("/m/{mid}")
+async def meeting_link(mid: str):
+    """A plain link to a meeting (Inbox "Open", Telegram) → the app at that meeting."""
+    if not store.ID_RE.match(mid):
+        return RedirectResponse("/")
+    return RedirectResponse(f"/#/m/{mid}")
+
+
+def widget_key() -> str:
+    """Read-only key for the Home widget. Uno Work shows the widget in a frame
+    on another site, where the login cookie is not sent (third-party), so the
+    widget page takes this key instead. It shows the last meeting's title and
+    open action items — nothing else; changes if the cookie secret does."""
+    return hmac.new(cookie_secret(), b"notetaker-widget-v1", hashlib.sha256).hexdigest()[:32]
+
+
+WIDGET_TMPL = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="{refresh}"><title>Notetaker</title><style>
+:root {{ color-scheme: light dark; --muted: #74726c; --line: rgba(128,128,128,.25); --accent: #2f5bea; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --muted: #a3a19b; --accent: #8aa6ff; }} }}
+* {{ box-sizing: border-box; }}
+body {{ margin: 0; padding: 12px 14px; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  background: transparent; overflow: hidden; }}
+a {{ color: inherit; text-decoration: none; }}
+.k {{ color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }}
+.t {{ font-weight: 650; font-size: 15px; margin: 2px 0 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.m {{ color: var(--muted); font-size: 12px; margin-bottom: 8px; }}
+.n {{ display: inline-block; font-weight: 650; color: var(--accent); }}
+ul {{ list-style: none; margin: 4px 0 0; padding: 0; }}
+li {{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 0; }}
+li::before {{ content: "☐ "; color: var(--muted); }}
+b {{ font-weight: 600; }} .more {{ color: var(--muted); font-size: 12px; margin-top: 2px; }}
+.empty {{ color: var(--muted); margin-top: 18px; }}
+</style></head><body>{body}</body></html>"""
+
+
+def _widget_body() -> tuple[str, int]:
+    esc = html.escape
+    base = APP_URL or ""
+    meetings = store.list_all()
+    busy = next((m for m in meetings if m["status"] in ("recording", "uploading", "queued", "transcribing",
+                                                         "summarizing")), None)
+    done = next((m for m in meetings if m["status"] == "done"), None)
+    if not done and not busy:
+        return (f'<div class="k">Notetaker</div><p class="empty">No meetings yet. '
+                f'<a href="{esc(base)}/" target="_blank" rel="noopener"><span class="n">Record one →</span></a></p>', 300)
+    parts = []
+    if busy:
+        what = "Recording…" if busy["status"] == "recording" else (busy.get("progress") or "Working…")
+        parts.append(f'<div class="k">Now</div><a href="{esc(base)}/m/{busy["id"]}" target="_blank" rel="noopener">'
+                     f'<div class="t">{esc(busy["title"] or "New meeting")}</div><div class="m">{esc(what)}</div></a>')
+    if done:
+        items = [it for it in actions.for_meeting(done["id"]) if not it["done"]]
+        n = len(items)
+        count = f'<span class="n">{n} action item{"s" if n != 1 else ""}</span>' if n else "no action items"
+        head = "Last meeting" if not busy else "Before that"
+        parts.append(f'<a href="{esc(base)}/m/{done["id"]}" target="_blank" rel="noopener">'
+                     f'<div class="k">{head}</div><div class="t">{esc(done["title"] or "Untitled meeting")}</div>'
+                     f'<div class="m">{esc(_when(done["created_at"]))} · {count}</div></a>')
+        if items and not busy:
+            lis = "".join(f"<li>{('<b>' + esc(it['owner']) + ':</b> ') if it['owner'] else ''}{esc(it['text'])}</li>"
+                          for it in items[:3])
+            more = f'<div class="more">+{n - 3} more</div>' if n > 3 else ""
+            parts.append(f"<ul>{lis}</ul>{more}")
+    return "".join(parts), 20 if busy else 300
+
+
+def _when(iso: str) -> str:
+    try:
+        from datetime import datetime
+        d = datetime.fromisoformat(iso)
+        return d.strftime("%b %-d, %H:%M")
+    except (ValueError, TypeError):
+        return ""
+
+
+@app.get("/widget", response_class=HTMLResponse)
+async def widget(request: Request, k: str = ""):
+    if not (_session_ok(request) or (k and hmac.compare_digest(k, widget_key()))):
+        return HTMLResponse('<p style="font:13px sans-serif;color:#74726c">Open Notetaker once to show this widget.</p>',
+                            status_code=401)
+    body, refresh = _widget_body()
+    return HTMLResponse(WIDGET_TMPL.format(body=body, refresh=refresh), headers={
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+        "Referrer-Policy": "no-referrer"})
+
+
+@app.get("/manifest.webmanifest")
+async def web_manifest():
+    """Installable on a phone (Add to Home Screen); on Android the installed
+    app is a Share target — share a voice memo or a recording to Notetaker."""
+    return JSONResponse({
+        "name": "Uno Notetaker", "short_name": "Notetaker", "start_url": "/", "scope": "/", "id": "/",
+        "display": "standalone", "background_color": "#f7f7f5", "theme_color": "#f7f7f5",
+        "description": "Meeting notes: record or upload — transcript, summary, action items.",
+        "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                  {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                  {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+        "share_target": {"action": "/share-target", "method": "POST", "enctype": "multipart/form-data",
+                         "params": {"title": "title", "text": "text",
+                                    "files": [{"name": "audio", "accept": [
+                                        "audio/*", "video/*", ".m4a", ".mp3", ".wav", ".ogg", ".opus", ".webm",
+                                        ".mp4", ".mov", ".aac", ".amr", ".flac"]}]}},
+    }, media_type="application/manifest+json")
+
+
+@app.api_route("/share-target", methods=["GET", "POST"])
+async def share_target_fallback():
+    """The service worker takes shared files; this only runs when it isn't
+    installed yet (first open) — ask to open the app once and share again."""
+    return RedirectResponse("/#/share-missed", status_code=303)
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return FileResponse(os.path.join(STATIC, "sw.js"), media_type="text/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
 # ---- startup ---------------------------------------------------------------
 
 def write_manifest() -> None:
@@ -390,9 +630,15 @@ def write_manifest() -> None:
         return
     manifest = {"name": "Notetaker", "icon": "🎙️", "port": PORT,
                 "description": "Meeting notes: record a call or upload a file — transcript, summary, action items.",
-                # The AI of this computer (Uno Work App API): chat + speech-to-text, no agent
-                # tasks, at most $10 unless the person raises it in Settings → Apps.
-                "ai": {"chat": True, "tasks": False, "limitUsd": 10}}
+                # The AI of this computer (Uno Work App API): chat + speech-to-text, and
+                # tasks (an action item handed to the AI becomes a Work chat the person
+                # sees; asked with tools "ask"), at most $10 unless the person raises it
+                # in Settings → Apps.
+                "ai": {"chat": True, "tasks": True, "limitUsd": 10},
+                # "Notes ready: … · 3 action items" in the Uno Work Inbox.
+                "notify": True,
+                # Home widget "Last meeting · 3 action items" (the key: see widget_key).
+                "widget": {"path": f"/widget?k={widget_key()}", "size": "small", "title": "Last meeting"}}
     if APP_URL:
         manifest["url"] = APP_URL
     try:
@@ -409,6 +655,7 @@ async def startup():
     for mid in store.stale_recordings():
         store.update(mid, status="queued", progress="Recording was interrupted — processing what was saved…")
     pipeline.start_worker()
+    telegram.start()
     write_manifest()
     p = ai_provider()
     log.info("Uno Notetaker %s on :%d — AI: %s via %s (%s)", APP_VERSION, PORT, p.name, p.route_label,

@@ -2,25 +2,41 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f7f7f5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Notetaker">
 <title>Notetaker</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="view-list">
 <div class="app">
   <aside class="side">
-    <div class="brand"><span class="logo">🎙️</span> Notetaker</div>
-    <div class="side-actions">
-      <button class="btn primary wide" id="btn-record">● Record a meeting</button>
-      <button class="btn wide" id="btn-upload">⬆ Upload a recording</button>
-      <input type="file" id="file-input" accept="audio/*,video/*,.m4a,.mp3,.wav,.ogg,.webm,.mp4,.mov,.mkv,.flac,.opus" hidden>
+    <header class="side-head">
+      <div class="brand"><img src="/static/icon.svg" alt="" class="logo"> Notetaker</div>
+      <button class="icon-btn only-phone" id="btn-settings-top" title="Settings" aria-label="Settings">⚙</button>
+    </header>
+    <div class="side-actions only-desktop">
+      <button class="btn primary wide" id="btn-record"><span class="dot"></span> Record</button>
+      <button class="btn wide" id="btn-upload">Upload a recording</button>
     </div>
-    <input class="search" id="search" type="search" placeholder="Search meetings…">
+    <input type="file" id="file-input" accept="audio/*,video/*,.m4a,.mp3,.wav,.ogg,.webm,.mp4,.mov,.mkv,.flac,.opus,.aac,.amr" hidden>
+    <div class="search-wrap"><input class="search" id="search" type="search" placeholder="Search all meetings…" autocomplete="off" enterkeyhint="search"></div>
+    <nav class="views">
+      <a href="#/" class="view-tab" data-view="meetings">Meetings</a>
+      <a href="#/actions" class="view-tab" data-view="actions">Action items <span class="count" id="actions-count"></span></a>
+    </nav>
     <nav class="list" id="list"></nav>
-    <div class="side-foot">
-      <button class="link" id="btn-settings">⚙ Settings</button>
+    <div class="side-foot only-desktop">
+      <button class="link" id="btn-settings">Settings</button>
       <span class="ai-status" id="ai-status"></span>
+    </div>
+    <div class="phone-bar only-phone">
+      <button class="btn primary" id="btn-record-phone"><span class="dot"></span> Record</button>
+      <button class="btn" id="btn-upload-phone">Upload</button>
     </div>
   </aside>
 
@@ -30,23 +46,26 @@
 <!-- Record dialog -->
 <dialog id="dlg-record">
   <form method="dialog" class="dlg">
-    <h2>Record a meeting</h2>
-    <label class="field">Title <span class="hint">(optional — the AI will name it)</span>
-      <input name="title" placeholder="e.g. Call with Acme">
-    </label>
-    <fieldset class="choice">
-      <label><input type="radio" name="mode" value="call" checked>
-        <b>A call in another tab</b><span>Google Meet, Zoom, Teams in the browser. You'll pick the tab and share its audio; your microphone is recorded separately, so the transcript knows what you said.</span></label>
+    <h2>Record</h2>
+    <fieldset class="choice" id="rec-modes">
+      <label class="mode-call"><input type="radio" name="mode" value="call">
+        <b>A call in another tab</b><span>Google Meet, Zoom or Teams in this browser. You pick the tab and share its audio; your microphone is a separate track, so the transcript knows what you said.</span></label>
       <label><input type="radio" name="mode" value="mic">
-        <b>In the room</b><span>Microphone only — a meeting around a table, a voice memo.</span></label>
+        <b>In the room / voice memo</b><span>Microphone only: a meeting around a table, a call on speaker, a note to yourself.</span></label>
     </fieldset>
-    <div class="row2">
-      <label class="field">Kind of meeting <select name="template" id="rec-template"></select></label>
-      <label class="field">Language <select name="language"><option value="auto">Detect</option><option value="ru">Русский</option><option value="en">English</option></select></label>
-    </div>
+    <label class="field">Title <span class="hint">optional, the AI names it</span>
+      <input name="title" placeholder="Call with Acme" autocomplete="off">
+    </label>
+    <details class="more">
+      <summary>Kind of meeting and language</summary>
+      <div class="row2">
+        <label class="field">Kind <select name="template" id="rec-template"></select></label>
+        <label class="field">Language <select name="language"><option value="auto">Detect</option><option value="ru">Русский</option><option value="en">English</option></select></label>
+      </div>
+    </details>
     <div class="consent">
-      <label><input type="checkbox" name="consent" required> I'll tell everyone this meeting is recorded.</label>
-      <div class="consent-line">Say it or paste in the chat: <code id="consent-text">Heads-up: I'm recording this call with Uno Notetaker to take notes.</code> <button type="button" class="link" id="copy-consent">Copy</button></div>
+      <label><input type="checkbox" name="consent" required> I'll tell everyone this is recorded.</label>
+      <div class="consent-line">Say it or paste it in the chat: <q id="consent-text">Heads-up: I'm recording this call with Uno Notetaker to take notes.</q> <button type="button" class="link" id="copy-consent">Copy</button></div>
     </div>
     <div class="dlg-actions">
       <button value="cancel" class="btn" formnovalidate>Cancel</button>
@@ -58,16 +77,51 @@
 <!-- Upload dialog -->
 <dialog id="dlg-upload">
   <form method="dialog" class="dlg">
-    <h2>Upload a recording</h2>
-    <p class="muted" id="upload-name"></p>
-    <label class="field">Title <span class="hint">(optional)</span><input name="title"></label>
-    <div class="row2">
-      <label class="field">Kind of meeting <select name="template" id="up-template"></select></label>
-      <label class="field">Language <select name="language"><option value="auto">Detect</option><option value="ru">Русский</option><option value="en">English</option></select></label>
-    </div>
+    <h2>Make notes from a recording</h2>
+    <p class="file-name" id="upload-name"></p>
+    <label class="field">Title <span class="hint">optional</span><input name="title" autocomplete="off"></label>
+    <details class="more">
+      <summary>Kind of meeting and language</summary>
+      <div class="row2">
+        <label class="field">Kind <select name="template" id="up-template"></select></label>
+        <label class="field">Language <select name="language"><option value="auto">Detect</option><option value="ru">Русский</option><option value="en">English</option></select></label>
+      </div>
+    </details>
     <div class="dlg-actions">
       <button value="cancel" class="btn" formnovalidate>Cancel</button>
-      <button value="ok" class="btn primary">Transcribe</button>
+      <button value="ok" class="btn primary">Make notes</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Share dialog -->
+<dialog id="dlg-share">
+  <form method="dialog" class="dlg">
+    <h2>Share the notes</h2>
+    <p class="muted">Anyone with the link can read the notes. They can't see your other meetings or change anything.</p>
+    <label class="check"><input type="checkbox" id="share-transcript"> Include the transcript</label>
+    <div class="share-url" id="share-url-row" hidden>
+      <input id="share-url" readonly>
+      <button type="button" class="btn" id="share-copy">Copy</button>
+    </div>
+    <div class="dlg-actions">
+      <button type="button" class="link danger" id="share-stop" hidden>Stop sharing</button>
+      <span class="grow"></span>
+      <button value="cancel" class="btn" formnovalidate>Close</button>
+      <button type="button" class="btn primary" id="share-create">Create link</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Rename speaker -->
+<dialog id="dlg-speaker">
+  <form method="dialog" class="dlg">
+    <h2>Rename speaker</h2>
+    <p class="muted">Changes the name in the transcript and in the notes.</p>
+    <label class="field">Name <input name="to" id="speaker-to" required autocomplete="off" maxlength="40"></label>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn" formnovalidate>Cancel</button>
+      <button value="ok" class="btn primary">Rename</button>
     </div>
   </form>
 </dialog>
@@ -76,10 +130,21 @@
 <dialog id="dlg-settings">
   <form method="dialog" class="dlg wide-dlg" id="settings-form">
     <h2>Settings</h2>
-    <h3>AI provider</h3>
+
+    <h3>When notes are ready</h3>
+    <label class="check"><input type="checkbox" name="notify_inbox"> <span><b>Uno Work Inbox</b> <span class="muted" id="inbox-note">— the bell in Uno Work: “Notes ready · 3 action items”.</span></span></label>
+    <label class="check"><input type="checkbox" name="notify_telegram"> <span><b>Telegram</b> <span class="muted">— the summary and action items to your chat.</span></span></label>
+
+    <h3>Telegram</h3>
+    <div class="tg" id="tg-box"></div>
+
+    <h3>On your phone</h3>
+    <p class="fine">Open this page on your phone and choose <b>Add to Home Screen</b>. You can record voice memos and meetings in the room from there; on Android, <b>Share</b> a recording from any app to Notetaker. Or send it to your Telegram bot.</p>
+
+    <h3>AI</h3>
     <fieldset class="choice">
       <label><input type="radio" name="provider" value="uno">
-        <b>Uno AI</b><span id="uno-provider-note">Works out of the box on your Uno computer — no keys. Usage is billed to your Uno AI balance.</span></label>
+        <b>Uno AI</b><span id="uno-provider-note">Works out of the box on your Uno computer — no keys.</span></label>
       <label><input type="radio" name="provider" value="custom">
         <b>Another provider</b><span>Any OpenAI-compatible endpoint: OpenAI, OpenRouter, a local server.</span></label>
     </fieldset>
@@ -111,7 +176,7 @@
     <label class="field">Kind of meeting <select name="template" id="set-template"></select></label>
     <div class="test-out" id="test-out"></div>
     <div class="dlg-actions">
-      <button type="button" class="btn" id="btn-test">Test connection</button>
+      <button type="button" class="btn" id="btn-test">Test AI</button>
       <span class="grow"></span>
       <button value="cancel" class="btn" formnovalidate>Close</button>
       <button value="ok" class="btn primary">Save</button>

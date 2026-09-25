@@ -197,7 +197,9 @@ class TestManifestAndState(RouteBase):
         main.write_manifest()
         with open(os.path.join(self.tmp, "notetaker.json")) as fh:
             manifest = json.load(fh)
-        self.assertEqual(manifest["ai"], {"chat": True, "tasks": False, "limitUsd": 10})
+        self.assertEqual(manifest["ai"], {"chat": True, "tasks": True, "limitUsd": 10})
+        self.assertTrue(manifest["notify"])
+        self.assertRegex(manifest["widget"]["path"], r"^/widget\?k=[0-9a-f]{32}$")
         self.key_dir()
         saved_state = config.STATE_DIR
         config.STATE_DIR = self.tmp  # no settings.json there → defaults

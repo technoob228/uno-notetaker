@@ -12,7 +12,7 @@ RUN chmod 644 /opt/models/speaker.onnx
 COPY notetaker ./notetaker
 COPY static ./static
 COPY entrypoint.sh /entrypoint.sh
-ENV PYTHONUNBUFFERED=1 PORT=8430 HF_HUB_DISABLE_TELEMETRY=1
+ENV PYTHONUNBUFFERED=1 PORT=8430 HF_HUB_DISABLE_TELEMETRY=1 HF_HOME=/state/hf XDG_CACHE_HOME=/state/cache
 EXPOSE 8430
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8430/healthz')" || exit 1
 ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]

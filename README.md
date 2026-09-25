@@ -17,6 +17,29 @@ Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
 - **Share** a read-only link to the notes (optionally with the transcript).
 - Every meeting is a folder in `~/Meetings` (audio, `transcript.md`,
   `notes.md`), so Files and the AI on the computer see it.
+- **Action items** are checkboxes: tick them off in the meeting or in the
+  **Action items** view across all meetings (it is the `[x]` in `notes.md`,
+  so editing the file works too). **Ask Uno to do it** hands one item to the
+  AI of the computer — a Uno Work chat (App API `/v1/tasks`, tools `ask`:
+  it asks before changing anything) that drafts the email or document.
+- **When notes are ready** the app tells you: the **Uno Work Inbox** (the
+  bell; App API `/v1/notify`, "Notes ready · 3 action items", Open → the
+  meeting) and **Telegram**.
+- **Telegram**: your own bot (token from @BotFather, Settings → Telegram,
+  paired by a one-time link, then it talks to that chat only). Send it a voice
+  message or a recording (≤ 20 MB — the Bot API limit) and the notes come back
+  as a reply; `/todo`, `/last`, `/find words`. Long polling: nothing on the
+  computer has to be reachable from the internet.
+- **Search across meetings**: every word must match; hits show the line of
+  the notes or the transcript (with its time — click to jump there).
+- **Speakers**: rename one ("Speaker 1" → "Mike") everywhere — transcript and
+  notes; talk time per person.
+- **Home widget** in Uno Work: "Last meeting · 3 action items" + the first
+  three (manifest `widget`, a read-only key in the widget URL because the
+  frame is third-party and gets no login cookie).
+- **Phone**: one screen at a time, Record/Upload at the bottom, recording on
+  iPhone (Safari records mp4, not webm) with the screen kept awake; installable
+  (Add to Home Screen) and, on Android, a **Share target** for recordings.
 
 ## AI
 
@@ -79,11 +102,13 @@ Elsewhere: set `UNO_HOME` to a folder for `Meetings`, and either
 
 ```
 app/notetaker/   FastAPI backend: config (keys, AI route), audio (ffmpeg), ai (STT/LLM),
-                 pipeline (recording → transcript → notes), store (~/Meetings),
+                 pipeline (recording → transcript → notes), store (~/Meetings, search),
+                 actions (action items from notes.md), deliver (Inbox, tasks), telegram (bot),
                  uno_app.py (vendored Uno App SDK)
 app/tests/       unit tests: python3 -m unittest discover -s app/tests
 app/static/      the UI (plain JS, no build)
 testdata/        TTS test meetings (RU/EN) + smoke.py (end-to-end over the API)
+                 + smoke_v2.py (action items, Inbox, tasks, search, widget, Telegram — against fakes)
 ```
 
 ## Security
@@ -98,7 +123,9 @@ testdata/        TTS test meetings (RU/EN) + smoke.py (end-to-end over the API)
 
 ## Not yet
 
-- **A bot that joins the call** (Google Meet first). See `docs/bot-plan.md`.
+- **A bot that joins the call** (Google Meet first). See `docs/bot-plan.md`:
+  Meet/Teams make the host admit a guest bot, Zoom needs an approved
+  Marketplace app (since 03.2026). Record the call's tab instead.
 - Live transcript during the meeting (now: after Stop).
 - Deleting audio after N days, per-meeting sharing of audio.
 - Renaming speakers by hand (the AI names are right most of the time, not always).

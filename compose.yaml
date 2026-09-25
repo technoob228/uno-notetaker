@@ -34,7 +34,7 @@ services:
       - ${UNO_HOME:-/home/unowork}:/host
   notetaker:
     build: ./app
-    image: uno-notetaker:0.1.0
+    image: uno-notetaker:0.3.0
     restart: unless-stopped
     depends_on:
       uno-dirs: {condition: service_completed_successfully}

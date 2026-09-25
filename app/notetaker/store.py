@@ -15,7 +15,7 @@ import secrets
 import shutil
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from .config import MEETINGS_DIR
 
@@ -59,10 +59,19 @@ def folder(mid: str) -> str | None:
         return path
 
 
-def create(title: str, source: str, template: str, language: str) -> dict:
+def _local_now(tz_offset_min: int | None) -> datetime:
+    """Now in the person's time zone (the browser sends its offset; the
+    container runs in UTC), with the offset in the ISO string so every
+    browser shows the right time."""
+    if tz_offset_min is None or not -900 <= tz_offset_min <= 900:
+        return datetime.now().astimezone()
+    return datetime.now(timezone(timedelta(minutes=tz_offset_min)))
+
+
+def create(title: str, source: str, template: str, language: str, tz_offset_min: int | None = None) -> dict:
     with _lock:
         os.makedirs(MEETINGS_DIR, exist_ok=True)
-        now = datetime.now()
+        now = _local_now(tz_offset_min)
         mid = secrets.token_hex(5)
         base = f"{now:%Y-%m-%d %H-%M} {_safe_title(title)}"
         path, n = os.path.join(MEETINGS_DIR, base), 2
@@ -186,19 +195,95 @@ def list_all() -> list[dict]:
         return out
 
 
-def search(q: str) -> list[dict]:
-    q = q.strip().lower()
-    if not q:
+# ---- search -------------------------------------------------------------------
+#
+# Across every meeting: title, notes (line by line) and the transcript
+# (utterance by utterance, so a hit knows its timestamp and speaker). All
+# words of the query must appear in the meeting; lines are ranked by how many
+# of the words they hold. Texts are cached per file mtime, so typing in the
+# search box does not re-read ~/Meetings on every key.
+
+_text_cache: dict[str, tuple[tuple, object]] = {}
+
+
+def _cached(mid: str, name: str, parse):
+    path = folder(mid)
+    if not path:
+        return parse("")
+    full = os.path.join(path, name)
+    try:
+        st = os.stat(full)
+    except OSError:
+        return parse("")
+    # inode too: every write is a new file (os.replace), and two edits within
+    # one mtime tick must not look the same.
+    mtime = (st.st_ino, st.st_mtime_ns, st.st_size)
+    key = f"{mid}/{name}/{getattr(parse, '__name__', '')}"
+    hit = _text_cache.get(key)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    value = parse(read_text(mid, name))
+    _text_cache[key] = (mtime, value)
+    return value
+
+
+def _raw(text: str) -> str:
+    return text
+
+
+def _segments(raw: str) -> list:
+    try:
+        segs = json.loads(raw or "[]")
+        return segs if isinstance(segs, list) else []
+    except ValueError:
+        return []
+
+
+def _snippet(text: str, words: list[str], width: int = 150) -> str:
+    low = text.lower()
+    pos = min((low.find(w) for w in words if low.find(w) >= 0), default=0)
+    start = max(0, pos - 50)
+    out = text[start:start + width].strip()
+    return ("…" if start else "") + out + ("…" if start + width < len(text) else "")
+
+
+def _clean_md(line: str) -> str:
+    line = re.sub(r"^\s*(#+|[-*]\s+\[[ xX]\]|[-*]|\d+[.)])\s*", "", line)
+    line = re.sub(r"\s*\[\d{1,2}:\d{2}(?::\d{2})?\]", "", line)
+    return line.replace("**", "").strip()
+
+
+def search(q: str, limit_hits: int = 3) -> list[dict]:
+    words = [w for w in re.split(r"\s+", q.strip().lower()) if w][:8]
+    if not words:
         return list_all()
-    hits = []
+    out = []
     for m in list_all():
-        text = " ".join([m["title"] or "", read_text(m["id"], "notes.md"),
-                         read_text(m["id"], "transcript.md")]).lower()
-        pos = text.find(q)
-        if pos >= 0:
-            snippet = text[max(0, pos - 60): pos + 90].replace("\n", " ")
-            hits.append({**m, "snippet": snippet})
-    return hits
+        mid = m["id"]
+        notes = _cached(mid, "notes.md", _raw)
+        segs = _cached(mid, "transcript.json", _segments)
+        title = (m["title"] or "").lower()
+        blob = " ".join([title, notes.lower(), " ".join(str(x.get("text", "")).lower() for x in segs)])
+        if not all(w in blob for w in words):
+            continue
+        hits = []
+        for line in notes.splitlines():
+            clean = _clean_md(line)
+            n = sum(w in clean.lower() for w in words)
+            if n and clean.lower() != title:
+                hits.append((n + 0.5, {"where": "notes", "text": _snippet(clean, words)}))
+        for x in segs:
+            text = str(x.get("text", ""))
+            n = sum(w in text.lower() for w in words)
+            if n:
+                hits.append((n, {"where": "transcript", "text": _snippet(text, words), "ts": x.get("start", 0),
+                                 "speaker": x.get("speaker") or ""}))
+        hits.sort(key=lambda h: -h[0])
+        score = sum(w in title for w in words) * 3 + (hits[0][0] if hits else 0)
+        out.append((score, m["created_at"] or "", {**m, "hits": [h[1] for h in hits[:limit_hits]],
+                                                   "hit_count": len(hits)}))
+    out.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [x[2] for x in out]
 
 
 def delete(mid: str) -> bool:
@@ -223,10 +308,10 @@ def by_share_token(token: str) -> dict | None:
 
 
 def stale_recordings(max_idle_s: int = 6 * 3600) -> list[str]:
-    """Recordings whose browser went away without pressing Stop."""
+    """Recordings (and uploads) whose browser went away without finishing."""
     out = []
     for m in list_all():
-        if m["status"] == "recording":
+        if m["status"] in ("recording", "uploading"):
             path = folder(m["id"])
             try:
                 if time.time() - os.path.getmtime(os.path.join(path, "meeting.json")) > max_idle_s:

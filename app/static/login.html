@@ -4,12 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Notetaker — sign in</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <main class="login">
-  <form id="f" class="dlg" style="max-width:380px;margin:14vh auto;background:#fff;border:1px solid var(--line);border-radius:16px">
-    <h2>🎙️ Notetaker</h2>
+  <form id="f" class="dlg" style="max-width:380px;width:calc(100% - 32px);margin:14vh auto;background:#fff;border:1px solid var(--line);border-radius:16px">
+    <h2 style="display:flex;gap:10px;align-items:center"><img src="/static/icon.svg" alt="" width="28" height="28" style="border-radius:7px"> Notetaker</h2>
     <p class="muted" style="margin:0">Enter the password from the app card in Uno Work.</p>
     <label class="field">Password <input type="password" name="password" autofocus required autocomplete="current-password"></label>
     <p class="bad" id="err" style="color:var(--bad);margin:0" hidden></p>

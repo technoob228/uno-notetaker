@@ -285,6 +285,7 @@ Format exactly:
 
 ## Action items
 - [ ] **<owner or "—">**: <task> (due: <date if said>) [mm:ss]
+(keep the literal "due:" in any language; omit the parentheses when no date was said)
 
 ## Open questions
 - questions raised but not resolved

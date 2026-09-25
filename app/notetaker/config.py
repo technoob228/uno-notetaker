@@ -36,7 +36,7 @@ UNO_WORK_SETTINGS = os.environ.get("UNO_WORK_SETTINGS", "/uno-work/settings.json
 UNO_GATEWAY_URL = os.environ.get("UNO_LLM_BASE_URL", "https://api.getuno.xyz/v1").rstrip("/")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 APP_URL = os.environ.get("UNO_APP_URL", "")
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 USER_AGENT = f"uno-notetaker/{APP_VERSION}"
 
 DEFAULT_MODEL = "deepseek/deepseek-v3.2"
@@ -59,12 +59,28 @@ class Settings:
     language: str = "auto"             # auto | ru | en — speech language hint
     notes_language: str = "auto"       # auto (= speech) | ru | en
     template: str = "general"
+    # When notes are ready: a notification in the Uno Work Inbox (the bell)
+    # and a message to the person's Telegram (if a bot is connected).
+    notify_inbox: bool = True
+    notify_telegram: bool = True
+    # Telegram: the person's own bot (from @BotFather). Only the paired chat
+    # may talk to it: send recordings in, get notes back.
+    telegram_token: str = ""
+    telegram_chat_id: str = ""
+    telegram_chat_name: str = ""
+    telegram_bot_name: str = ""
+    # The person's time zone (minutes east of UTC) as their browser last said;
+    # for meetings that arrive without a browser (Telegram). -10000 = unknown.
+    tz_offset_min: int = -10000
     extra: dict = field(default_factory=dict)
 
     def public(self) -> dict:
         d = asdict(self)
         d["custom_api_key"] = ("•" * 8 + self.custom_api_key[-4:]) if self.custom_api_key else ""
         d["custom_api_key_set"] = bool(self.custom_api_key)
+        d["telegram_token"] = ("•" * 8 + self.telegram_token[-4:]) if self.telegram_token else ""
+        d["telegram_token_set"] = bool(self.telegram_token)
+        d.pop("extra", None)
         return d
 
 
@@ -88,11 +104,17 @@ def load_settings() -> Settings:
     return s
 
 
-def save_settings(update: dict) -> Settings:
+# Set by the app itself (Telegram pairing), never by the Settings form.
+INTERNAL_SETTINGS = ("telegram_chat_id", "telegram_chat_name", "telegram_bot_name", "tz_offset_min")
+
+
+def save_settings(update: dict, internal: bool = False) -> Settings:
     with _lock:
         s = load_settings()
         for k, v in update.items():
-            if k == "custom_api_key" and (v is None or str(v).startswith("•")):
+            if k in INTERNAL_SETTINGS and not internal:
+                continue
+            if k in ("custom_api_key", "telegram_token") and (v is None or str(v).startswith("•")):
                 continue  # masked value came back from the form: keep the stored key
             if hasattr(s, k) and k != "extra" and isinstance(v, type(getattr(s, k))):
                 setattr(s, k, v.strip() if isinstance(v, str) else v)

@@ -1,4 +1,4 @@
-# Vendored from uno-work sdk/python/uno_app.py (Uno App SDK) — keep in sync; do not edit here.
+# Vendored from uno-work sdk/python/uno_app.py (Uno App SDK, uno-work v0.0.84) — keep in sync; do not edit here.
 """Uno App SDK — "the AI of this computer" for any app on it.
 
 One stdlib-only file (Python >= 3.9). The Uno Work daemon keeps a copy at
@@ -33,7 +33,7 @@ __version__ = "0.1.0"
 __all__ = [
     "DEFAULT_URL", "UnoAppError", "Client", "Task", "resolve_config", "find_config",
     "ask", "stream", "chat", "transcribe", "transcribe_json", "task", "get_task", "tasks",
-    "whoami", "models",
+    "whoami", "models", "Storage", "storage", "guess_content_type",
 ]
 
 DEFAULT_URL = "http://127.0.0.1:3779"
@@ -121,7 +121,7 @@ def resolve_config(url: Optional[str] = None, token: Optional[str] = None,
             break
         time.sleep(_TOKEN_POLL_S)
     raise UnoAppError(0, "no_app_token",
-                      f'No Uno app token. Add "ai": {{"chat": true}} to ~/.uno/apps/{app_id or "<id>"}.json')
+                      f'No Uno app token. Add "ai": {{"chat": true}} and/or "storage": true to ~/.uno/apps/{app_id or "<id>"}.json')
 
 
 def find_config(url: Optional[str] = None, token: Optional[str] = None,
@@ -200,7 +200,7 @@ class Client:
 
     # -- low level
 
-    def _open(self, method: str, path: str, body: Optional[bytes] = None,
+    def _open(self, method: str, path: str, body: Any = None,
               headers: Optional[Dict[str, str]] = None, timeout: Optional[float] = None) -> Any:
         for attempt in range(2):
             cfg = self.config
@@ -364,6 +364,29 @@ class Client:
     def models(self) -> Any:
         return self._json("GET", "/v1/models")
 
+    # -- notifications
+
+    def notify(self, title: str, body: Optional[str] = None, open: Any = None,
+               group: Optional[str] = None) -> Dict[str, Any]:
+        """Put a notification into the person's Inbox (manifest "notify": true).
+
+        open: {"file": "~/..."}, {"url": "https://..."} or {"app": True, "path": "/..."}.
+        Same group while unread -> one item that updates instead of many.
+        """
+        payload: Dict[str, Any] = {"title": title}
+        if body is not None:
+            payload["body"] = body
+        if open is not None:
+            payload["open"] = open
+        if group is not None:
+            payload["group"] = group
+        return self._json("POST", "/v1/notify", payload)
+
+    @property
+    def storage(self) -> "Storage":
+        """The app's own folder in the account's cloud (manifest "storage")."""
+        return Storage(self)
+
 
 class Task:
     """A running agent task. .data is the latest task JSON."""
@@ -450,6 +473,156 @@ class Task:
         return out
 
 
+# ---- cloud storage -------------------------------------------------------------
+
+_CONTENT_TYPES = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
+    "webp": "image/webp", "avif": "image/avif", "heic": "image/heic", "svg": "image/svg+xml",
+    "pdf": "application/pdf", "txt": "text/plain; charset=utf-8",
+    "md": "text/markdown; charset=utf-8", "csv": "text/csv; charset=utf-8",
+    "html": "text/html; charset=utf-8", "json": "application/json", "mp3": "audio/mpeg",
+    "m4a": "audio/mp4", "ogg": "audio/ogg", "wav": "audio/wav", "mp4": "video/mp4",
+    "webm": "video/webm", "mov": "video/quicktime", "zip": "application/zip",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+
+def guess_content_type(name: str) -> str:
+    """Content-Type from a file name (what a browser gets back on download)."""
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return _CONTENT_TYPES.get(ext, "application/octet-stream")
+
+
+def _file_path(key: str) -> str:
+    folder = isinstance(key, str) and key.endswith("/")
+    clean = (key[:-1] if folder else key) if isinstance(key, str) else ""
+    if not clean or any(part in ("", ".", "..") for part in clean.split("/")):
+        raise UnoAppError(400, "invalid_key", 'A file key looks like "photos/cat.jpg".')
+    encoded = "/".join(urllib.parse.quote(part, safe="") for part in clean.split("/"))
+    return f"/v1/storage/files/{encoded}" + ("?folder=1" if folder else "")
+
+
+class Storage:
+    """The app's own folder in the Uno account's cloud: Cloud storage → apps/<id>/.
+
+    Keys are relative to that folder ("photos/2026/cat.jpg"); one file <= 256 MB.
+    Keep the person's files here (photos, documents, uploads, exports); keep
+    only databases, caches and temporary files on the computer's disk.
+    """
+
+    def __init__(self, client: Client):
+        self._client = client
+
+    def put(self, key: str, data: Union[str, bytes, bytearray],
+            content_type: Optional[str] = None) -> Dict[str, Any]:
+        """Save bytes or text under a key (overwrites)."""
+        if isinstance(data, str):
+            body = data.encode("utf-8")
+            guessed = guess_content_type(key)
+            ctype = content_type or (
+                "text/plain; charset=utf-8" if guessed == "application/octet-stream" else guessed)
+        elif isinstance(data, (bytes, bytearray)):
+            body = bytes(data)
+            ctype = content_type or guess_content_type(key)
+        else:
+            raise UnoAppError(0, "invalid_request",
+                              "put() takes str or bytes; use upload(path, key) for a file on disk")
+        headers = {"Content-Type": ctype, "Content-Length": str(len(body))}
+        with self._client._open("PUT", _file_path(key), body, headers) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def put_json(self, key: str, value: Any) -> Dict[str, Any]:
+        return self.put(key, json.dumps(value, ensure_ascii=False), "application/json")
+
+    def upload(self, local_path: Union[str, "os.PathLike[str]"], key: Optional[str] = None,
+               content_type: Optional[str] = None) -> Dict[str, Any]:
+        """Upload a file from disk, streamed. key defaults to the file name."""
+        local = os.fspath(local_path)
+        target = key or os.path.basename(local)
+        size = os.path.getsize(local)
+        headers = {"Content-Type": content_type or guess_content_type(target),
+                   "Content-Length": str(size)}
+        with open(local, "rb") as fh:
+            with self._client._open("PUT", _file_path(target), fh if size else b"",
+                                    headers) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+    def open(self, key: str, range: Optional[str] = None) -> Any:
+        """The raw HTTP response (a file-like object with .read(), .headers)."""
+        headers = {"Range": range} if range else {}
+        return self._client._open("GET", _file_path(key), None, headers)
+
+    def get(self, key: str) -> bytes:
+        with self.open(key) as resp:
+            return resp.read()
+
+    def get_text(self, key: str) -> str:
+        return self.get(key).decode("utf-8")
+
+    def get_json(self, key: str) -> Any:
+        return json.loads(self.get(key).decode("utf-8"))
+
+    def download(self, key: str, local_path: Union[str, "os.PathLike[str]"]) -> str:
+        """Stream a file to disk; returns the path."""
+        local = os.fspath(local_path)
+        with self.open(key) as resp, open(local, "wb") as out:
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+        return local
+
+    def exists(self, key: str) -> bool:
+        try:
+            self._client._open("HEAD", _file_path(key)).close()
+            return True
+        except UnoAppError as exc:
+            if exc.status == 404:
+                return False
+            raise
+
+    def list(self, prefix: str = "") -> Dict[str, Any]:
+        """One folder level: {prefix, folders: ["photos/2026/"], files: [{key, name, size, modifiedAt}]}."""
+        return self._client._json("GET", "/v1/storage/list?prefix=" + urllib.parse.quote(prefix))
+
+    def list_all(self, prefix: str = "") -> List[Dict[str, Any]]:
+        """Every file under a folder, walking sub-folders."""
+        out: List[Dict[str, Any]] = []
+        queue = [prefix]
+        while queue:
+            level = self.list(queue.pop(0))
+            out.extend(level.get("files", []))
+            queue.extend(level.get("folders", []))
+        return out
+
+    def delete(self, key: str) -> Dict[str, Any]:
+        """Delete a file, or a whole folder when the key ends in "/"."""
+        return self._client._json("DELETE", _file_path(key))
+
+    def url(self, key: str, expires_in: Optional[int] = None) -> str:
+        """Temporary https link (default 15 min, max 1 h) for <img src>, <a href> or a redirect:
+        the browser downloads straight from the cloud, not through the app."""
+        payload: Dict[str, Any] = {"key": key}
+        if expires_in is not None:
+            payload["expiresIn"] = expires_in
+        return str(self._client._json("POST", "/v1/storage/url", payload)["url"])
+
+    def usage(self) -> Dict[str, Any]:
+        """{folder, usedBytes, limitBytes, remainingBytes, files}."""
+        return self._client._json("GET", "/v1/storage")
+
+
+class _DefaultStorage:
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_client().storage, name)
+
+
+storage = _DefaultStorage()
+
+
 # ---- module-level functions on a lazily created default client ---------------
 
 _default: Optional[Client] = None
@@ -503,6 +676,11 @@ def tasks() -> Any:
 
 def whoami() -> Dict[str, Any]:
     return _client().whoami()
+
+
+def notify(title: str, body: Optional[str] = None, open: Any = None,
+           group: Optional[str] = None) -> Dict[str, Any]:
+    return _client().notify(title, body, open, group)
 
 
 def models() -> Any:

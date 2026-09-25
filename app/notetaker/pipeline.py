@@ -13,7 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import ai, audio, diarize, store
+from . import ai, audio, deliver, diarize, store
 from .config import ai_provider, load_settings
 
 log = logging.getLogger("notetaker")
@@ -23,6 +23,13 @@ _qlock = threading.Lock()
 
 SPEAKER = {"mic": "Me", "tab": "Others", "upload": "", "bot": ""}
 STT_WORKERS = 4
+
+
+def _safe(fn, *args) -> None:
+    try:
+        fn(*args)
+    except Exception:  # noqa: BLE001 — notifications never fail a meeting
+        log.exception("%s failed", getattr(fn, "__name__", fn))
 
 
 def enqueue(mid: str, kind: str = "full") -> None:
@@ -49,6 +56,7 @@ def start_worker() -> None:
                 log.exception("job %s %s failed", kind, mid)
                 msg = str(exc) if isinstance(exc, (ai.AIError, RuntimeError)) else f"Unexpected error: {exc}"
                 store.update(mid, status="error", error=msg, progress="")
+                _safe(deliver.after_error, mid)
 
     threading.Thread(target=loop, daemon=True, name="notetaker-worker").start()
     # Resume what a restart interrupted.
@@ -350,9 +358,50 @@ def summarize(mid: str) -> None:
     u.update({"model": usage.get("model") or s.model, "notes_prompt_tokens": usage.get("prompt_tokens"),
               "notes_completion_tokens": usage.get("completion_tokens"),
               "notes_cost": usage.get("cost"), "notes_seconds": round(time.time() - started, 1)})
-    store.update(mid, status="done", progress="", title=title, usage=u)
+    store.update(mid, progress="", title=title, usage=u)
     if title and not meta.get("title"):
         store.rename_folder(mid, title)
     if title and meta.get("title") != title:
         # the transcript header carries the title too
         store.write_text(mid, "transcript.md", transcript_md(store.get(mid), segments))
+    # Tell the person (Inbox, Telegram) before "done", so the page that opens
+    # shows where the notes were sent.
+    _safe(deliver.after_notes, mid)
+    store.update(mid, status="done")
+
+
+def rename_speaker(mid: str, old: str, new: str) -> int:
+    """Rename a speaker everywhere: transcript.json/.md and the notes (the
+    label as a whole word). → number of transcript lines changed."""
+    new = re.sub(r"\s+", " ", new).strip()[:40]
+    if not old or not new or old == new:
+        return 0
+    try:
+        segments = json.loads(store.read_text(mid, "transcript.json") or "[]")
+    except ValueError:
+        return 0
+    n = 0
+    for x in segments:
+        if x.get("speaker") == old:
+            x["speaker"] = new
+            x.pop("guessed", None)
+            n += 1
+    if not n:
+        return 0
+    store.write_text(mid, "transcript.json", json.dumps(segments, ensure_ascii=False, indent=1))
+    store.write_text(mid, "transcript.md", transcript_md(store.get(mid), segments))
+    notes = store.read_text(mid, "notes.md")
+    if notes and old not in ("Me", "Others"):
+        store.write_text(mid, "notes.md", re.sub(rf"(?<!\w){re.escape(old)}(?!\w)", new, notes))
+    return n
+
+
+def talk_time(segments: list[dict]) -> list[dict]:
+    """[{speaker, seconds, share}] — who talked how much, most first."""
+    total: dict[str, float] = {}
+    for x in segments:
+        if x.get("speaker"):
+            total[x["speaker"]] = total.get(x["speaker"], 0.0) + max(0.0, float(x["end"]) - float(x["start"]))
+    s = sum(total.values()) or 1.0
+    return [{"speaker": k, "seconds": round(v), "share": round(v / s, 3)}
+            for k, v in sorted(total.items(), key=lambda kv: -kv[1])]
