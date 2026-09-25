@@ -69,7 +69,9 @@ def parse(notes: str) -> list[dict]:
         body = body.rstrip(" .;")
         if not body:
             continue
-        items.append({"id": _item_id(m.group(4)), "line": i, "owner": owner, "text": body, "due": due,
+        # The id is the task itself, not the owner: renaming a speaker
+        # ("Speaker 1" → "Mike") keeps ticks and "handed to the AI" marks.
+        items.append({"id": _item_id(body), "line": i, "owner": owner, "text": body, "due": due,
                       "ts": ts, "ts_seconds": _ts_seconds(ts) if ts else None,
                       "done": m.group(2).lower() == "x"})
     return items

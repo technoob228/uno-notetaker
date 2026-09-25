@@ -130,6 +130,14 @@ class RenameTest(unittest.TestCase):
         self.assertIn("Mike:", store.read_text(mid, "transcript.md"))
         self.assertIn("Speaker 1 will check", segs[2]["text"], "the spoken words are not rewritten")
 
+    def test_action_id_survives_rename(self):
+        from notetaker import pipeline
+        mid = make_meeting("Rename id", notes=NOTES.replace("**—**", "**Speaker 1**"))
+        before = actions.for_meeting(mid)[2]["id"]
+        pipeline.rename_speaker(mid, "Speaker 1", "Mike")
+        after = actions.for_meeting(mid)[2]
+        self.assertEqual((after["id"], after["owner"]), (before, "Mike"))
+
     def test_talk_time(self):
         from notetaker import pipeline
         tt = pipeline.talk_time(TRANSCRIPT)
