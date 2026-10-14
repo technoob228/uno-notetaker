@@ -36,7 +36,7 @@ UNO_WORK_SETTINGS = os.environ.get("UNO_WORK_SETTINGS", "/uno-work/settings.json
 UNO_GATEWAY_URL = os.environ.get("UNO_LLM_BASE_URL", "https://api.getuno.xyz/v1").rstrip("/")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 APP_URL = os.environ.get("UNO_APP_URL", "")
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 USER_AGENT = f"uno-notetaker/{APP_VERSION}"
 
 DEFAULT_MODEL = "deepseek/deepseek-v3.2"
@@ -72,6 +72,14 @@ class Settings:
     # The person's time zone (minutes east of UTC) as their browser last said;
     # for meetings that arrive without a browser (Telegram). -10000 = unknown.
     tz_offset_min: int = -10000
+    # Calendars (secret iCal links, see calendars.py) and the bot that joins calls.
+    calendars: list = field(default_factory=list)   # [{id, url, name}] — set via /api/calendars only
+    bot_auto_join: str = "all"         # all | accepted | off
+    bot_name: str = "Uno Notetaker"
+    bot_chat_message: bool = True      # say in the call's chat that it is recorded
+    bot_join_early_min: int = 1        # join this many minutes before the start
+    bot_lobby_wait_min: int = 15       # give up if nobody lets the bot in
+    my_emails: str = ""                # the person's addresses: "declined" / "accepted" in invitations
     extra: dict = field(default_factory=dict)
 
     def public(self) -> dict:
@@ -81,6 +89,7 @@ class Settings:
         d["telegram_token"] = ("•" * 8 + self.telegram_token[-4:]) if self.telegram_token else ""
         d["telegram_token_set"] = bool(self.telegram_token)
         d.pop("extra", None)
+        d.pop("calendars", None)  # secret links: see calendars.public_list()
         return d
 
 
@@ -105,7 +114,7 @@ def load_settings() -> Settings:
 
 
 # Set by the app itself (Telegram pairing), never by the Settings form.
-INTERNAL_SETTINGS = ("telegram_chat_id", "telegram_chat_name", "telegram_bot_name", "tz_offset_min")
+INTERNAL_SETTINGS = ("telegram_chat_id", "telegram_chat_name", "telegram_bot_name", "tz_offset_min", "calendars")
 
 
 def save_settings(update: dict, internal: bool = False) -> Settings:

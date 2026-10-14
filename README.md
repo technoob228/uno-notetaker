@@ -2,6 +2,12 @@
 
 Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
 
+- **A bot joins your calls** — Google Meet, Zoom, Microsoft Teams, Yandex
+  Telemost, Zoho Meeting — as a guest named "Uno Notetaker", by itself for the
+  calls in your calendar (connect it by its secret iCal address: Google,
+  Outlook, Yandex, Zoho, iCloud) or when you send it by link. It records the
+  call and leaves when it ends; the notes come like for any recording. See
+  **Calls** in the app and `docs/bot.md`.
 - **Record** a call in another browser tab (Google Meet, Zoom, Teams on the web):
   the tab's audio and your microphone are recorded as two tracks, so the
   transcript knows what *you* said. Or record a meeting in the room (mic only).
@@ -104,7 +110,10 @@ Elsewhere: set `UNO_HOME` to a folder for `Meetings`, and either
 app/notetaker/   FastAPI backend: config (keys, AI route), audio (ffmpeg), ai (STT/LLM),
                  pipeline (recording → transcript → notes), store (~/Meetings, search),
                  actions (action items from notes.md), deliver (Inbox, tasks), telegram (bot),
+                 calendars (iCal → calls), bot (the call bot's sessions, its API),
                  uno_app.py (vendored Uno App SDK)
+bot/             the call bot: notetaker_bot/ (platforms.py — how to join each service,
+                 session.py — one call, capture.py — PulseAudio + ffmpeg)
 app/tests/       unit tests: python3 -m unittest discover -s app/tests
 app/static/      the UI (plain JS, no build)
 testdata/        TTS test meetings (RU/EN) + smoke.py (end-to-end over the API)
@@ -120,12 +129,28 @@ testdata/        TTS test meetings (RU/EN) + smoke.py (end-to-end over the API)
 - The container drops root after fixing folder ownership and runs as the
   computer's user; the Uno Work state dir is mounted read-only.
 - Voice fingerprints are computed on the computer and never stored or sent.
+- Calendar links are secrets: kept in the state volume, shown masked. The bot
+  container holds no keys — only a token that opens `/api/bot/worker/*`.
+
+## The bot that joins calls
+
+The `bot` service (`./bot`: Chromium on a virtual screen, PulseAudio, ffmpeg)
+joins calls as a guest and streams their sound to the app; the app keeps the
+calendars and the sessions and makes the notes. Details, what was tested on
+each platform and the limits: `docs/bot.md`.
+
+- **Calls** page: the bot's state, calls coming up (a switch per call), recent
+  calls with what happened ("not let in", "what the bot saw" — a screenshot).
+- Settings → **Calls and the bot**: join every call with a link / only accepted
+  ones / only when sent; the bot's name; minutes early; how long to wait in the
+  lobby; your email (to skip calls you declined); a hello in the call's chat.
+- The host has to let a guest in (Meet, Teams, Zoom waiting room) — like with
+  Otter or Fireflies. KakaoTalk group calls have no browser link: no bot there.
+- Each call is a Chromium of ~0.5–1 GB: `BOT_MAX_CALLS` (2) at once. On a
+  small computer run without it: `docker compose up -d notetaker`.
 
 ## Not yet
 
-- **A bot that joins the call** (Google Meet first). See `docs/bot-plan.md`:
-  Meet/Teams make the host admit a guest bot, Zoom needs an approved
-  Marketplace app (since 03.2026). Record the call's tab instead.
 - Live transcript during the meeting (now: after Stop).
 - Deleting audio after N days, per-meeting sharing of audio.
 - Renaming speakers by hand (the AI names are right most of the time, not always).

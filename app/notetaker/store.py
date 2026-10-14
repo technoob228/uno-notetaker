@@ -81,7 +81,7 @@ def create(title: str, source: str, template: str, language: str, tz_offset_min:
         meta = {
             "id": mid, "title": title.strip() or "", "created_at": now.isoformat(timespec="seconds"),
             "source": source, "template": template, "language": language,
-            "status": "recording" if source == "browser" else "uploading",
+            "status": "recording" if source in ("browser", "bot") else "uploading",
             "progress": "", "error": "", "duration": 0, "tracks": {},
             "share": None, "chat": [], "usage": {}, "folder": os.path.basename(path),
         }

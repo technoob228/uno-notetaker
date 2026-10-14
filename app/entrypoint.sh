@@ -24,6 +24,8 @@ if [ -d /uno-dot ]; then
   export UNO_APPS_DIR=/uno-dot/apps
 fi
 chown -R "$PUID:$PGID" /state 2>/dev/null || true
+# The token for the bot container (a volume only the two share).
+if [ -d /bot-key ]; then chown "$PUID:$PGID" /bot-key; fi
 export HOME=/state
 exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups \
   uvicorn notetaker.main:app --host 0.0.0.0 --port "${PORT:-8430}" --proxy-headers --forwarded-allow-ips='*' --no-server-header

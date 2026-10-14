@@ -102,7 +102,7 @@ def _clean_label(label: str) -> str:
     return label or "Speaker"
 
 
-def guess_speakers(segments: list[dict], s) -> list[dict]:
+def guess_speakers(segments: list[dict], s, attendees: list[str] | None = None) -> list[dict]:
     """One recording, several people: ask the notes model who said each line.
 
     Cheap (the answer is one short label per line) and optional — any failure
@@ -122,7 +122,7 @@ def guess_speakers(segments: list[dict], s) -> list[dict]:
         "Labels: a real name when the conversation reveals it, otherwise 'Speaker 1', 'Speaker 2', … "
         "Same person, same label. Never use placeholders like 'Name' or 'Unknown'.\n"
         'Reply with JSON only: {"who": "<one sentence: who is who and why>", "labels": [label for line 0, '
-        f"label for line 1, …]}} — exactly {len(segments)} labels."
+        f"label for line 1, …]}} — exactly {len(segments)} labels." + _invited(attendees)
     )
     try:
         text, _ = ai.chat(ai_provider(s), s, [{"role": "system", "content": prompt},
@@ -142,7 +142,16 @@ def guess_speakers(segments: list[dict], s) -> list[dict]:
     return segments
 
 
-def name_voices(segments: list[dict], s) -> list[dict]:
+def _invited(attendees: list[str] | None) -> str:
+    """A hint from the calendar invitation: who could be speaking."""
+    names = [a for a in (attendees or []) if a][:30]
+    if not names:
+        return ""
+    return (" People invited to this meeting (from the calendar; not all of them may speak, and others may "
+            f"join): {', '.join(names)}. Use these spellings when a name in the conversation matches one.")
+
+
+def name_voices(segments: list[dict], s, attendees: list[str] | None = None) -> list[dict]:
     """Voice groups (by sound) → names (by what was said).
 
     The groups are fixed; the notes model only picks a name for each, which
@@ -169,7 +178,7 @@ def name_voices(segments: list[dict], s) -> list[dict]:
         "name if the conversation reveals it, otherwise 'Speaker 1', 'Speaker 2', …. A name in a greeting or "
         "question ('Hi Sarah', 'Олег, …') belongs to the person being ADDRESSED — the one who answers — never "
         "to the one saying it; 'I'm Anna' means the speaker is Anna. Different groups get different labels. "
-        'Reply with JSON only: {"V1": "label", …}'
+        'Reply with JSON only: {"V1": "label", …}' + _invited(attendees)
     )
     names: dict = {}
     try:
@@ -312,10 +321,10 @@ def transcribe(mid: str) -> None:
             segments = drop_echo(segments)
         if any("voice" in x for x in segments):
             store.update(mid, progress="Naming speakers…")
-            segments = name_voices(segments, s)
+            segments = name_voices(segments, s, meta.get("attendees"))
         elif len(wavs) == 1 and segments:
             store.update(mid, progress="Telling speakers apart…")
-            segments = guess_speakers(segments, s)
+            segments = guess_speakers(segments, s, meta.get("attendees"))
         if not segments:
             raise RuntimeError("No speech was found in the recording.")
         meta = store.get(mid)
