@@ -9,6 +9,10 @@
 # Apps. Meetings go to ~/Meetings. ADMIN_PASSWORD is required — the App Store
 # generates it and shows it on the app card.
 #
+# The `bot` service joins calls by itself (Calls → connect a calendar, or send
+# it by link). Leave it out — `docker compose up -d notetaker` — on a computer
+# with little memory: everything else works without it.
+#
 # Only the two folders the app needs from ~/.uno are mounted. Never mount the
 # whole ~/.uno: it holds the AI keys of every other app on the computer.
 name: uno-notetaker
@@ -34,7 +38,7 @@ services:
       - ${UNO_HOME:-/home/unowork}:/host
   notetaker:
     build: ./app
-    image: uno-notetaker:0.3.0
+    image: uno-notetaker:0.4.0
     restart: unless-stopped
     depends_on:
       uno-dirs: {condition: service_completed_successfully}
@@ -58,8 +62,29 @@ services:
       # a folder and break Uno Work.
       - ${UNO_WORK_USERDATA:-/var/lib/uno-work/userdata}:/uno-work:ro
       - state:/state
+      # The bot container's token (the app writes it, the bot reads it).
+      - bot-key:/bot-key
     ports: ["8430:8430"]
     # A 1-hour meeting peaks ~250 MB (ffmpeg + app); local Whisper base adds ~0.5 GB.
     mem_limit: 1500m
+  # The bot that joins calls (Meet, Zoom, Teams, Telemost, Zoho) as a guest —
+  # by itself for the calls in the person's calendars, or when sent by link.
+  # Chromium on a virtual screen + PulseAudio; it records each call's sound
+  # and streams it to the app, which makes the notes. Idle it is a small
+  # Python process; each call is a browser of ~0.5–1 GB (MAX_CALLS at once).
+  # It talks only to the app (and the call sites) and holds no keys.
+  bot:
+    build: ./bot
+    image: uno-notetaker-bot:0.4.0
+    restart: unless-stopped
+    depends_on: [notetaker]
+    environment:
+      NOTETAKER_URL: http://notetaker:8430
+      MAX_CALLS: ${BOT_MAX_CALLS:-2}
+    volumes:
+      - bot-key:/bot-key:ro
+    shm_size: 1gb
+    mem_limit: ${BOT_MEM_LIMIT:-2500m}
 volumes:
   state: {}
+  bot-key: {}

@@ -28,6 +28,7 @@
     <nav class="views">
       <a href="#/" class="view-tab" data-view="meetings">Meetings</a>
       <a href="#/actions" class="view-tab" data-view="actions">Action items <span class="count" id="actions-count"></span></a>
+      <a href="#/calls" class="view-tab" data-view="calls">Calls <span class="count live" id="calls-live"></span></a>
     </nav>
     <nav class="list" id="list"></nav>
     <div class="side-foot only-desktop">
@@ -126,6 +127,43 @@
   </form>
 </dialog>
 
+<!-- Send the bot to a call -->
+<dialog id="dlg-bot">
+  <form method="dialog" class="dlg">
+    <h2>Send the bot to a call</h2>
+    <p class="muted">The bot joins as a guest named <b id="bot-name-hint">Uno Notetaker</b>, records and leaves when the call ends. The host may have to let it in.</p>
+    <label class="field">Link to the call <input name="url" id="bot-url" required autocomplete="off" placeholder="https://meet.google.com/abc-defg-hij"></label>
+    <p class="fine">Google Meet, Zoom, Microsoft Teams, Yandex Telemost, Zoho Meeting, Jitsi.</p>
+    <label class="field">Title <span class="hint">optional, the AI names it</span><input name="title" autocomplete="off"></label>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn" formnovalidate>Cancel</button>
+      <button value="ok" class="btn primary">Send the bot</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Connect a calendar -->
+<dialog id="dlg-calendar">
+  <form method="dialog" class="dlg wide-dlg">
+    <h2>Connect a calendar</h2>
+    <p class="muted">Paste your calendar's <b>secret iCal address</b>. Notetaker reads it every few minutes and sends the bot to calls that have a link. It's read-only, and you can reset the address in your calendar any time.</p>
+    <details class="howto" open><summary>Where to find it</summary>
+      <dl>
+        <dt>Google Calendar</dt><dd>Settings (⚙) → click your calendar on the left → <b>Integrate calendar</b> → <b>Secret address in iCal format</b>.</dd>
+        <dt>Outlook / Microsoft 365</dt><dd>Settings → Calendar → <b>Shared calendars</b> → <b>Publish a calendar</b> → “Can view all details” → Publish → copy the <b>ICS</b> link.</dd>
+        <dt>Yandex Calendar</dt><dd>The calendar's ⋯ → <b>Settings</b> → <b>Export</b> → copy the link.</dd>
+        <dt>Zoho Calendar</dt><dd>Settings → My calendars → the calendar → <b>Export</b> → private iCal address.</dd>
+        <dt>Apple iCloud</dt><dd>Calendar → share icon → <b>Public Calendar</b> → copy the link (webcal://…).</dd>
+      </dl>
+    </details>
+    <label class="field">iCal address <input name="url" id="cal-url" required autocomplete="off" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"></label>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn" formnovalidate>Cancel</button>
+      <button value="ok" class="btn primary" id="cal-add">Connect</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- Settings -->
 <dialog id="dlg-settings">
   <form method="dialog" class="dlg wide-dlg" id="settings-form">
@@ -140,6 +178,21 @@
 
     <h3>On your phone</h3>
     <p class="fine">Open this page on your phone and choose <b>Add to Home Screen</b>. You can record voice memos and meetings in the room from there; on Android, <b>Share</b> a recording from any app to Notetaker. Or send it to your Telegram bot.</p>
+
+    <h3>Calls and the bot</h3>
+    <label class="field">The bot joins <select name="bot_auto_join">
+      <option value="all">every call in my calendars that has a link</option>
+      <option value="accepted">only calls I accepted or organize</option>
+      <option value="off">only when I send it</option></select></label>
+    <div class="row2">
+      <label class="field">Bot's name in the call <input name="bot_name" maxlength="60" placeholder="Uno Notetaker"></label>
+      <label class="field">Your email <span class="hint">for calls you declined</span><input name="my_emails" placeholder="you@company.com" autocomplete="off"></label>
+    </div>
+    <div class="row2">
+      <label class="field">Join minutes before the start <input name="bot_join_early_min" type="number" min="0" max="15"></label>
+      <label class="field">Wait to be let in, minutes <input name="bot_lobby_wait_min" type="number" min="1" max="60"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="bot_chat_message"> <span><b>Say in the call's chat that it's recorded</b> <span class="muted">— in many places everyone must know. The bot's name already says it; this is the polite way.</span></span></label>
 
     <h3>AI</h3>
     <fieldset class="choice">

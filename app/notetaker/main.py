@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import actions, ai, deliver, pipeline, store, telegram
+from . import actions, ai, bot, calendars, deliver, pipeline, store, telegram
 from .config import (ADMIN_PASSWORD, APP_URL, APP_VERSION, MODEL_CHOICES, ROUTE_APP, ai_provider,
                      cookie_secret, load_settings, notes_model, save_settings)
 
@@ -59,7 +59,8 @@ def _session_ok(request: Request) -> bool:
 
 _attempts: dict[str, list[float]] = defaultdict(list)
 PUBLIC_PREFIXES = ("/login", "/s/", "/static/", "/healthz", "/favicon", "/manifest.webmanifest", "/sw.js",
-                   "/widget", "/m/", "/share-target")
+                   "/widget", "/m/", "/share-target",
+                   "/api/bot/worker/")  # the bot container: its own token, checked in each handler
 
 
 @app.middleware("http")
@@ -134,6 +135,7 @@ def _state() -> dict:
         # What this computer offers: the Uno Work App API (Inbox, tasks for the AI) and Telegram.
         "uno_work": p.route == ROUTE_APP, "inbox": deliver.inbox_available(),
         "telegram": telegram.status(),
+        "bot": bot.worker_status(), "calendars": len(calendars.calendars()),
     }
 
 
@@ -146,6 +148,15 @@ async def state():
 async def put_settings(request: Request):
     body = await request.json()
     body.pop("telegram_token", None)  # only through /api/telegram/connect (checked with Telegram)
+    body.pop("calendars", None)  # only through /api/calendars (fetched and checked first)
+    if "bot_auto_join" in body and body["bot_auto_join"] not in ("all", "accepted", "off"):
+        raise HTTPException(400, "bot_auto_join: all, accepted or off")
+    for k, lo, hi in (("bot_join_early_min", 0, 15), ("bot_lobby_wait_min", 1, 60)):
+        if k in body:
+            try:
+                body[k] = max(lo, min(hi, int(body[k])))
+            except (TypeError, ValueError):
+                body.pop(k)
     if body.get("provider") == "custom":
         url = str(body.get("custom_base_url", "")).strip()
         if not url.startswith(("https://", "http://")):
@@ -451,6 +462,137 @@ def telegram_test():
     return {"ok": True}
 
 
+# ---- calendars and the bot that joins calls -------------------------------------
+
+@app.get("/api/calls")
+def calls_overview():  # sync: may read calendars
+    return bot.overview()
+
+
+@app.post("/api/calls/join")
+async def bot_join(request: Request):
+    body = await request.json()
+    url = str(body.get("url", "")).strip()
+    platform, found = calendars.find_link(url)
+    if not found and not re.match(r"^https?://[^\s]+$", url):
+        raise HTTPException(400, "Paste the link to the call (https://…)")
+    x = bot.create(found or url, str(body.get("title", "")))
+    if not bot.worker_status()["online"]:
+        x = {**x, "warning": "The bot container is not running — the bot will go when it starts."}
+    return x
+
+
+@app.post("/api/calls/sessions/{sid}/stop")
+async def bot_stop(sid: str):
+    x = bot.stop(sid)
+    if not x:
+        raise HTTPException(404, "No such call")
+    return x
+
+
+@app.put("/api/calls/events/{key}")
+async def bot_event_choice(key: str, request: Request):
+    """The person's choice for one occurrence: join | skip | "" (= automatic)."""
+    body = await request.json()
+    choice = body.get("choice") or None
+    if choice not in (None, "join", "skip"):
+        raise HTTPException(400, "choice: join, skip or empty")
+    calendars.set_choice(key, choice)
+    ev = calendars.find_event(key)
+    if ev and choice == "join":
+        calendars.poke()  # already started? go now
+    return {"ok": True}
+
+
+@app.post("/api/calendars")
+def add_calendar(body: dict):  # sync: fetches the calendar
+    try:
+        return calendars.add(str(body.get("url", "")))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/api/calendars/{cid}")
+async def remove_calendar(cid: str):
+    if not calendars.remove(cid):
+        raise HTTPException(404, "No such calendar")
+    return {"ok": True}
+
+
+@app.post("/api/calendars/refresh")
+def refresh_calendars():
+    calendars.refresh(force=True)
+    return bot.overview()
+
+
+# The bot container (token in the Authorization header; see bot.py).
+
+def _bot_auth(request: Request) -> None:
+    if not bot.token_ok(request.headers.get("authorization", "")):
+        raise HTTPException(401, "bad bot token")
+
+
+@app.get("/api/bot/worker/work")
+async def bot_work(request: Request, capacity: int = 1, running: str = "", wait: float = 0, version: str = ""):
+    _bot_auth(request)
+    ids = [x for x in running.split(",") if x][:20]
+    capacity = max(0, min(10, capacity))
+    out = bot.claim(capacity, ids, version)
+    if not out["start"] and not out["stop"] and wait > 0:
+        await run_in_threadpool(bot.wait_for_work, min(wait, 25.0))
+        out = bot.claim(capacity, ids, version)
+    return out
+
+
+@app.post("/api/bot/worker/sessions/{sid}/status")
+async def bot_report(sid: str, request: Request):
+    _bot_auth(request)
+    body = await request.json()
+    return bot.report(sid, str(body.get("status", "")), str(body.get("detail", "")))
+
+
+@app.put("/api/bot/worker/sessions/{sid}/audio")
+async def bot_audio(sid: str, request: Request, offset: int = 0, ext: str = "ogg"):
+    _bot_auth(request)
+    if not store.EXT_RE.match(ext):
+        raise HTTPException(400, "bad ext")
+    data = await request.body()
+    if len(data) > MAX_PIECE:
+        raise HTTPException(413, "piece too large")
+    try:
+        return {"bytes": bot.audio(sid, data, offset, ext)}
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.put("/api/bot/worker/sessions/{sid}/screenshot")
+async def bot_screenshot(sid: str, request: Request, why: str = ""):
+    _bot_auth(request)
+    data = await request.body()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(413, "too large")
+    try:
+        bot.save_screenshot(sid, data, why)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
+
+
+@app.get("/api/calls/sessions/{sid}/screenshot")
+async def bot_screenshot_get(sid: str):
+    path = bot.screenshot_path(sid)
+    if not path:
+        raise HTTPException(404, "No screenshot")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/bot/worker/sessions/{sid}/finish")
+async def bot_finish(sid: str, request: Request):
+    _bot_auth(request)
+    body = await request.json()
+    return bot.finish(sid, str(body.get("outcome", "done")), str(body.get("detail", "")))
+
+
 @app.delete("/api/meetings/{mid}")
 async def delete_meeting(mid: str):
     m = _meeting_or_404(mid)
@@ -656,6 +798,9 @@ async def startup():
         store.update(mid, status="queued", progress="Recording was interrupted — processing what was saved…")
     pipeline.start_worker()
     telegram.start()
+    bot.write_token()
+    bot.start_watchdog()
+    calendars.start(bot.due_from_calendar)
     write_manifest()
     p = ai_provider()
     log.info("Uno Notetaker %s on :%d — AI: %s via %s (%s)", APP_VERSION, PORT, p.name, p.route_label,

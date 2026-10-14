@@ -1,5 +1,6 @@
 name: image
-# Tag vX.Y.Z → ghcr.io/technoob228/uno-notetaker:X.Y.Z (+ latest).
+# Tag vX.Y.Z → ghcr.io/technoob228/uno-notetaker:X.Y.Z and
+# ghcr.io/technoob228/uno-notetaker-bot:X.Y.Z (+ latest).
 # The App Store compose plan pins an exact version, never latest.
 on:
   push:
@@ -11,6 +12,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - {context: ./app, image: ""}
+          - {context: ./bot, image: "-bot"}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -23,12 +29,12 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
-          context: ./app
+          context: ${{ matrix.context }}
           push: true
           platforms: linux/amd64
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=MIT
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}${{ matrix.image }}:${{ steps.v.outputs.version }}
+            ghcr.io/${{ github.repository }}${{ matrix.image }}:latest

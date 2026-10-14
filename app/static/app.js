@@ -104,6 +104,7 @@ async function loadState() {
     $(id).innerHTML = Object.entries(STATE.templates).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
     $(id).value = STATE.settings.template;
   }
+  liveCalls();
   $("#models").innerHTML = STATE.models.map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join("");
 }
 
@@ -184,7 +185,7 @@ function showHome() {
       ${p.ready ? "" : `<div class="warn">The AI is not set up yet. <button class="link" id="home-settings">Open Settings</button></div>`}
       <div class="tips">
         <div><b>From your phone</b><span>${STATE.telegram.paired ? `Send a voice message or a recording to <b>@${esc(STATE.telegram.bot)}</b> in Telegram.` : `Connect a Telegram bot in <button class="link inline" id="tip-tg">Settings</button> and send recordings to it.`} Or open this page on the phone and add it to the Home Screen.</span></div>
-        <div><b>A bot that joins the call?</b><span>Not yet: Meet and Teams make the host let a bot in, Zoom needs a Marketplace app. Record the call's tab instead — same notes.</span></div>
+        <div><b>A bot in your calls</b><span>${STATE.calendars ? `The bot joins the calls in your calendar — see <a href="#/calls">Calls</a>.` : `Connect your calendar in <a href="#/calls">Calls</a> and the bot joins every Meet, Zoom, Teams or Telemost call by itself — or send it to one by link.`}</span></div>
       </div>
       <p class="fine">Recording other people? Tell them first — in many places it's required by law.</p>
     </section>`;
@@ -251,6 +252,131 @@ function bindActionRows(root, refresh) {
       toast("A chat started in Uno Work — it asks you before it changes anything.");
     } catch (err) { toast(err.message, "bad"); b.disabled = false; b.textContent = "Ask Uno to do it"; }
   });
+}
+
+// ---- calls: calendars and the bot ------------------------------------------------
+
+const PLATFORM = { meet: "Meet", zoom: "Zoom", teams: "Teams", telemost: "Telemost", zoho: "Zoho", jitsi: "Jitsi", other: "Call" };
+const CALL_STATUS = { queued: "waiting for the bot", joining: "joining…", lobby: "waiting to be let in", recording: "● recording", leaving: "leaving…", done: "done", failed: "couldn't join", not_admitted: "not let in", cancelled: "cancelled" };
+let callsTimer = null;
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const platformTag = (p) => `<span class="pf pf-${esc(p || "other")}">${esc(PLATFORM[p] || "Call")}</span>`;
+
+async function showCalls() {
+  current = null; view = "calls";
+  clearInterval(pollTimer);
+  setView("detail");
+  await renderCalls();
+  loadList();
+  clearInterval(callsTimer);
+  callsTimer = setInterval(() => {
+    if (view !== "calls") { clearInterval(callsTimer); return; }
+    if (document.visibilityState === "visible" && !document.querySelector("dialog[open]")) renderCalls();
+  }, 5000);
+}
+
+async function renderCalls() {
+  let d;
+  try { d = await api("/api/calls"); }
+  catch (e) { $("#main").innerHTML = `<section class="page"><h1>Calls</h1><p class="bad">${esc(e.message)}</p></section>`; return; }
+  if (view !== "calls") return;
+  const w = d.worker;
+  const bot = w.online
+    ? `<p class="bot-line"><span class="dot-ok"></span> Bot ready${w.running ? ` · in ${plural(w.running, "call")} now` : ""}</p>`
+    : `<p class="bot-line bad"><span class="dot-bad"></span> The bot isn't running — start the <code>bot</code> service (<code>docker compose up -d</code>). Calls wait for it.</p>`;
+  const active = d.active.map((x) => `
+    <div class="call-card ${x.status}">
+      <div class="cc-main"><b>${esc(x.title || "Call")}</b> ${platformTag(x.platform)}
+        <div><span class="st st-${x.status}">${esc(CALL_STATUS[x.status] || x.status)}</span> <span class="muted">· ${esc(x.detail || "")}</span></div></div>
+      <div class="cc-btns">${x.meeting_id ? `<a class="btn" href="#/m/${x.meeting_id}">Open</a>` : ""}
+        <button class="btn" data-stop="${x.id}">${x.status === "queued" ? "Cancel" : "Remove the bot"}</button></div>
+    </div>`).join("");
+  let lastDay = "";
+  const upcoming = d.upcoming.filter((e) => e.url).map((e) => {
+    const day = new Date(e.start).toDateString();
+    const head = day !== lastDay ? `<div class="day">${dayLabel(e.start)}</div>` : "";
+    lastDay = day;
+    const s = e.session;
+    const state = s ? `<span class="st st-${s.status}">${esc(CALL_STATUS[s.status] || s.status)}</span>${s.meeting_id ? ` <a href="#/m/${s.meeting_id}">notes →</a>` : ""}`
+      : (e.join ? "" : `<span class="muted">${esc(e.why)}</span>`);
+    const past = new Date(e.end) < new Date();
+    return `${head}<div class="ev ${e.join ? "" : "off"} ${past ? "past" : ""}">
+      <span class="ev-time">${fmtTime(e.start)}<span class="ev-end">–${fmtTime(e.end)}</span></span>
+      <span class="ev-title">${esc(e.title || "Busy")} ${platformTag(e.platform)}${e.attendees ? ` <span class="muted small">· ${plural(e.attendees, "guest")}</span>` : ""}<br>${state}</span>
+      <label class="switch" title="${e.join ? "The bot will join" : "The bot won't join"}"><input type="checkbox" data-ev="${e.key}" ${e.join ? "checked" : ""} ${past || s ? "disabled" : ""}><i></i></label>
+    </div>`;
+  }).join("");
+  const noLink = d.upcoming.filter((e) => !e.url && new Date(e.end) > new Date()).length;
+  const cals = d.calendars.map((c) => `<li><b>${esc(c.name || "Calendar")}</b> <span class="muted">${esc(c.where)} · ${c.error ? `<span class="bad">${esc(c.error)}</span>` : `${plural(c.events, "event")} this week`}</span>
+      <button class="link danger small" data-cal-del="${c.id}">Remove</button></li>`).join("");
+  const recent = d.recent.map((x) => `<div class="ev past">
+      <span class="ev-time">${fmtDate(new Date(x.created_at * 1000).toISOString()).replace(/^Today, /, "")}</span>
+      <span class="ev-title">${esc(x.title || "Call")} ${platformTag(x.platform)}<br><span class="st st-${x.status}">${esc(CALL_STATUS[x.status] || x.status)}</span> <span class="muted">· ${esc(x.detail || "")}</span>
+        ${x.meeting_id ? ` <a href="#/m/${x.meeting_id}">notes →</a>` : ""}${x.screenshot ? ` <a href="/api/calls/sessions/${x.id}/screenshot" target="_blank" rel="noopener">what the bot saw</a>` : ""}</span>
+    </div>`).join("");
+  const mode = { all: "joins every call with a link", accepted: "joins calls you accepted or organize", off: "joins only when you send it" }[STATE.settings.bot_auto_join] || "";
+  $("#main").innerHTML = `
+    <section class="page calls">
+      <header class="page-head">
+        <a href="#/" class="back only-phone">‹ Meetings</a>
+        <h1>Calls</h1>
+        <button class="btn primary" id="btn-send-bot">Send the bot to a call</button>
+      </header>
+      ${bot}
+      ${active ? `<h3>Now</h3>${active}` : ""}
+      <h3>Coming up ${d.calendars.length ? `<span class="muted small">· the bot ${esc(mode)} · <button class="link small" id="calls-settings">change</button></span>` : ""}</h3>
+      ${d.calendars.length ? (upcoming || `<p class="muted">No calls with a link in the next 7 days.</p>`) + (noLink ? `<p class="fine">${plural(noLink, "event")} without a call link — the bot has nowhere to go.</p>` : "")
+        : `<div class="empty-cal"><p>Connect your calendar and the bot joins your calls by itself — Google Meet, Zoom, Teams, Yandex Telemost, Zoho Meeting. Or send it to a call by link.</p><button class="btn primary" id="btn-cal-first">Connect a calendar</button></div>`}
+      ${d.calendars.length ? `<h3>Calendars</h3><ul class="cals">${cals}</ul>
+        <div class="row-btns"><button class="btn" id="btn-cal-add">Add a calendar</button><button class="link" id="btn-cal-refresh">Check now</button></div>` : ""}
+      ${recent ? `<h3>Recent</h3>${recent}` : ""}
+      <p class="fine">The bot joins as a guest named “${esc(STATE.settings.bot_name || "Uno Notetaker")}”, so the host may have to let it in. It leaves when the call ends, when everyone else has left or after a long silence. KakaoTalk group calls have no link to open in a browser — the bot can't join those.</p>
+    </section>`;
+  $("#btn-send-bot").onclick = openBotDialog;
+  for (const id of ["#btn-cal-first", "#btn-cal-add"]) if ($(id)) $(id).onclick = () => { $("#cal-url").value = ""; $("#dlg-calendar").showModal(); };
+  if ($("#calls-settings")) $("#calls-settings").onclick = openSettings;
+  if ($("#btn-cal-refresh")) $("#btn-cal-refresh").onclick = async (e) => { e.target.disabled = true; try { await api("/api/calendars/refresh", { method: "POST" }); } catch (err) { toast(err.message, "bad"); } renderCalls(); };
+  $$("[data-stop]").forEach((b) => b.onclick = async () => { b.disabled = true; try { await api(`/api/calls/sessions/${b.dataset.stop}/stop`, { method: "POST" }); } catch (e) { toast(e.message, "bad"); } renderCalls(); });
+  $$("[data-cal-del]").forEach((b) => b.onclick = async () => { if (!confirm("Remove this calendar? The bot stops joining its calls.")) return; await api(`/api/calendars/${b.dataset.calDel}`, { method: "DELETE" }); await loadState(); renderCalls(); });
+  $$("[data-ev]").forEach((cb) => cb.onchange = async () => {
+    try { await api(`/api/calls/events/${cb.dataset.ev}`, { method: "PUT", body: JSON.stringify({ choice: cb.checked ? "join" : "skip" }) }); }
+    catch (e) { toast(e.message, "bad"); }
+    renderCalls();
+  });
+}
+
+function openBotDialog() {
+  $("#bot-name-hint").textContent = STATE.settings.bot_name || "Uno Notetaker";
+  $("#dlg-bot form").reset();
+  $("#dlg-bot").showModal();
+}
+$("#dlg-bot").addEventListener("close", async () => {
+  if ($("#dlg-bot").returnValue !== "ok") return;
+  const f = $("#dlg-bot form");
+  try {
+    const x = await api("/api/calls/join", { method: "POST", body: JSON.stringify({ url: f.url.value, title: f.title.value }) });
+    toast(x.warning || "The bot is on its way", x.warning ? "bad" : "");
+    location.hash === "#/calls" ? renderCalls() : (location.hash = "#/calls");
+  } catch (e) { toast(e.message, "bad"); }
+});
+$("#dlg-calendar").addEventListener("close", async () => {
+  if ($("#dlg-calendar").returnValue !== "ok") return;
+  toast("Reading the calendar…");
+  try {
+    const r = await api("/api/calendars", { method: "POST", body: JSON.stringify({ url: $("#cal-url").value }) });
+    toast(`Connected${r.name ? ` “${r.name}”` : ""} — ${plural(r.events, "event")} this week`);
+    await loadState();
+  } catch (e) { toast(e.message, "bad"); }
+  if (view === "calls") renderCalls();
+});
+
+function liveCalls() {
+  const n = STATE && STATE.bot ? STATE.bot.running : 0;
+  $("#calls-live").textContent = n ? `● ${n}` : "";
+}
+async function refreshBot() {
+  const s = await api("/api/state").catch(() => null);
+  if (s) { STATE.bot = s.bot; STATE.calendars = s.calendars; liveCalls(); }
 }
 
 // ---- recording -------------------------------------------------------------
@@ -505,7 +631,9 @@ async function renderMeeting(first = false) {
     const p = $("#progress-text"); if (p) p.textContent = m.progress || m.status;
     return;
   }
-  const src = { browser: "recorded in the browser", upload: "uploaded", telegram: "from Telegram" }[m.source] || m.source;
+  const src = { browser: "recorded in the browser", upload: "uploaded", telegram: "from Telegram",
+    bot: `the bot in ${PLATFORM[(m.call || {}).platform] || "the call"}` }[m.source] || m.source;
+  const botLive = m.source === "bot" && m.status === "recording";
   const open = (m.actions || []).filter((a) => !a.done).length;
   $("#main").innerHTML = `
     <article class="meeting">
@@ -515,6 +643,8 @@ async function renderMeeting(first = false) {
         <div class="m-meta">${fmtDate(m.created_at)}${m.duration ? ` · ${fmtTs(m.duration)}` : ""} · ${src}${m.segments.length && open ? ` · <b>${plural(open, "action item")}</b>` : ""}</div>
       </header>
       ${live ? recordingPanel() : ""}
+      ${botLive ? `<section class="rec-panel bot-panel"><span class="rec-dot"></span><div><b>The bot is in the call, recording.</b><p class="muted">Notes come when the call ends — or remove the bot to end the recording now.</p></div>
+        <button class="btn" id="bot-remove">Remove the bot</button></section>` : ""}
       ${m.status === "uploading" && !live ? `<section class="progress"><p id="up-pct">Uploading…</p><div class="bar"><i id="up-progress"></i></div></section>` : ""}
       ${busy && m.status !== "uploading" ? `<section class="progress"><div class="spinner"></div><div><p id="progress-text">${esc(m.progress || "Working…")}</p>${progressSteps(m)}</div></section>` : ""}
       ${m.status === "error" ? `<section class="error-box"><b>Something went wrong.</b> <span>${esc(m.error)}</span> <button class="btn" id="btn-retry">Retry</button></section>` : ""}
@@ -540,11 +670,17 @@ async function renderMeeting(first = false) {
         </div>
       </nav>
       <div class="tab-body" id="tab-body"></div>` : ""}
-      ${!m.segments.length && !busy && !live && m.status !== "error" ? `<p class="muted">Nothing here yet.</p>` : ""}
+      ${!m.segments.length && !busy && !live && !botLive && m.status !== "error" ? `<p class="muted">Nothing here yet.</p>` : ""}
     </article>`;
   $("#m-title").onchange = async (e) => { await api(`/api/meetings/${id}`, { method: "PUT", body: JSON.stringify({ title: e.target.value }) }); loadList(); };
   if ($("#btn-retry")) $("#btn-retry").onclick = async () => { await api(`/api/meetings/${id}/retry`, { method: "POST" }); openMeeting(id); };
   if (live) { $("#rec-stop").onclick = stopRecording; requestAnimationFrame(tickRecording); }
+  if (botLive) {
+    $("#bot-remove").onclick = async (e) => {
+      e.target.disabled = true; e.target.textContent = "Leaving…";
+      try { await api(`/api/calls/sessions/${m.call.session}/stop`, { method: "POST" }); } catch (err) { toast(err.message, "bad"); }
+    };
+  }
   if (m.segments.length) {
     $$(".tabs [data-tab]").forEach((b) => b.onclick = () => { tab = b.dataset.tab; renderMeeting(true); });
     $("#btn-share").onclick = () => shareDialog(m);
@@ -553,12 +689,12 @@ async function renderMeeting(first = false) {
     bindPlayerFollow();
     if (seekOnOpen !== null) { const at = seekOnOpen; seekOnOpen = null; setTimeout(() => focusLine(at, true), 50); }
   }
-  if (busy) {
+  if (busy || botLive) {
     pollTimer = setInterval(async () => {
       const s = await api(`/api/meetings/${id}`).catch(() => null);
       if (!s || id !== current) return;
       const p = $("#progress-text"); if (p) p.textContent = s.progress || s.status;
-      if (s.status !== m.status || !BUSY.includes(s.status)) { clearInterval(pollTimer); renderMeeting(true); loadList(); }
+      if (s.status !== m.status || (!BUSY.includes(s.status) && !botLive)) { clearInterval(pollTimer); renderMeeting(true); loadList(); }
     }, 2000);
   }
 }
@@ -855,6 +991,7 @@ function route() {
   let m;
   if ((m = h.match(/^#\/m\/([a-z0-9]{10})(?:\/t\/(\d+))?$/))) openMeeting(m[1], m[2] !== undefined ? Number(m[2]) : null);
   else if (h === "#/actions") showActions();
+  else if (h === "#/calls") showCalls();
   else if (h === "#/share") takeSharedFile();
   else if (h === "#/share-missed") { history.replaceState(null, "", "#/"); showHome(); toast("Open Notetaker once from the Home Screen, then share the recording again.", "bad"); }
   else showHome();
@@ -865,5 +1002,5 @@ window.addEventListener("hashchange", route);
   await loadState();
   route();
   if ("serviceWorker" in navigator && isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
-  setInterval(() => { if (!recording && document.visibilityState === "visible") loadList(); }, 15000);
+  setInterval(() => { if (!recording && document.visibilityState === "visible") { loadList(); refreshBot(); } }, 15000);
 })();

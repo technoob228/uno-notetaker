@@ -243,3 +243,52 @@ details.more[open] summary { margin-bottom: 10px; }
   .ask { bottom: calc(10px + var(--safe-b)); }
   .ask input { font-size: 16px; }
 }
+
+/* ---- calls: calendars and the bot ---- */
+.count.live { background: var(--rec); }
+.calls h3 { margin: 22px 0 6px; font-size: 15px; }
+.calls h3 .small, .small { font-size: 12.5px; font-weight: 400; }
+.calls .bad { color: var(--bad); }
+.bot-line { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 14px; color: var(--muted); }
+.bot-line.bad { color: var(--bad); }
+.dot-ok, .dot-bad { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); flex: none; }
+.dot-bad { background: var(--bad); }
+.call-card { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 14px; margin: 6px 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.call-card.recording { border-color: var(--rec); }
+.cc-main { min-width: 0; flex: 1; } .cc-btns { display: flex; gap: 8px; }
+.pf { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 5px; line-height: 17px; vertical-align: 1px;
+  background: var(--accent-soft); color: var(--accent); }
+.pf-meet { background: #e6f4ea; color: #137333; } .pf-zoom { background: #e8f0fe; color: #0b5cff; }
+.pf-teams { background: #ecebfa; color: #5b5fc7; } .pf-telemost { background: #fff4e0; color: #b25c00; }
+.pf-zoho { background: #fdecea; color: #c5221f; }
+.ev { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; align-items: center; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.ev.off .ev-title > :not(.muted):not(.pf), .ev.past { color: var(--muted); }
+.ev-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.ev-title { min-width: 0; overflow-wrap: anywhere; }
+.calls .day { padding-left: 4px; }
+.switch { position: relative; width: 38px; height: 22px; flex: none; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch i { position: absolute; inset: 0; border-radius: 11px; background: var(--line); transition: background .15s; pointer-events: none; }
+.switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.switch input:checked + i { background: var(--accent); }
+.switch input:checked + i::after { left: 19px; }
+.switch input:disabled + i { opacity: .45; }
+.empty-cal { padding: 18px; border: 1px dashed var(--line); border-radius: var(--radius); background: var(--panel); }
+.empty-cal p { margin-top: 0; }
+.cals { list-style: none; padding: 0; margin: 0; }
+.cals li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; padding: 6px 0; font-size: 14px; }
+.cals li .muted { flex: 1; font-size: 13px; }
+.howto dl { margin: 8px 0 0; font-size: 13.5px; }
+.howto dt { font-weight: 600; margin-top: 6px; } .howto dd { margin: 0; color: var(--muted); }
+.bot-panel { display: flex; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--rec); border-radius: 14px; padding: 16px 18px; margin-bottom: 18px; }
+.bot-panel > div { flex: 1; } .bot-panel p { margin: 2px 0 0; }
+@media (max-width: 760px) {
+  .ev { grid-template-columns: 64px 1fr auto; }
+  .ev-end { display: none; }
+  .page-head .btn { width: 100%; }
+}
+.calls a:not(.btn) { color: var(--accent); text-decoration: none; }
+.calls .st { font-weight: 550; }
+.st-done { color: var(--ok); } .st-failed, .st-not_admitted { color: var(--bad); } .st-lobby, .st-joining { color: var(--accent); }
+.cc-btns a.btn { color: inherit; text-decoration: none; }
