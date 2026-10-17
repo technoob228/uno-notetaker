@@ -107,10 +107,21 @@ async def logout():
 
 # ---- pages -----------------------------------------------------------------
 
+def _page(name: str) -> str:
+    """The page with its script and styles pinned to this version: after an
+    update the browser (and the Uno Work panel) fetch the new app.js instead of
+    running last version's from cache."""
+    with open(os.path.join(STATIC, name), encoding="utf-8") as f:
+        page = f.read()
+    for asset in ("/static/app.js", "/static/style.css"):
+        page = page.replace(f'{asset}"', f'{asset}?v={APP_VERSION}"')
+    return page
+
+
 @app.get("/")
 async def index(request: Request):
     page = "index.html" if _session_ok(request) else "login.html"
-    return FileResponse(os.path.join(STATIC, page), headers={"Cache-Control": "no-store"})
+    return HTMLResponse(_page(page), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/healthz")
@@ -118,7 +129,16 @@ async def healthz():
     return {"ok": True, "version": APP_VERSION}
 
 
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+class _Static(StaticFiles):
+    # Revalidate every time (ETag → a cheap 304): an old app.js must never
+    # outlive an update.
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers.setdefault("Cache-Control", "no-cache")
+        return resp
+
+
+app.mount("/static", _Static(directory=STATIC), name="static")
 
 
 # ---- settings --------------------------------------------------------------

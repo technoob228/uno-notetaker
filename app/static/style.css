@@ -77,7 +77,8 @@ mark { background: #fff1a8; color: inherit; border-radius: 2px; }
 .card { text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 20px; cursor: pointer; display: grid; gap: 6px; }
 .card:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(47,91,234,.08); }
 .card .ic { font-size: 20px; color: var(--accent); height: 24px; }
-.card .ic.rec::before { content: ""; display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--rec); margin-top: 4px; }
+/* Record: a red dot in a ring (not .rec — that is the recorder panel's box). */
+.card .ic-rec::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--rec); margin: 6px 0 0 5px; box-shadow: 0 0 0 3px var(--panel), 0 0 0 5px var(--rec); }
 .card b { font-size: 16.5px; } .card span:last-child { color: var(--muted); font-size: 14px; }
 .tips { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 26px 0 18px; }
 .tips div { display: grid; gap: 4px; font-size: 14px; }

@@ -179,13 +179,13 @@ function showHome() {
       <h1>Meeting notes, done for you</h1>
       <p class="lead">Record a call or upload a file. You get a transcript with speakers, a summary and action items — sent to your Inbox${STATE.telegram.paired ? " and Telegram" : ""}, saved in <code>~/Meetings</code>.</p>
       <div class="cards">
-        <button class="card" id="home-record"><span class="ic rec"></span><b>Record</b><span>A call in another tab (Meet, Zoom, Teams) or a meeting in the room.</span></button>
+        <button class="card" id="home-record"><span class="ic ic-rec" aria-hidden="true"></span><b>Record</b><span>A call in another tab (Meet, Zoom, Teams) or a meeting in the room.</span></button>
         <button class="card" id="home-upload"><span class="ic up">⬆</span><b>Upload a recording</b><span>Audio or video: m4a, mp3, wav, mp4, webm…</span></button>
       </div>
       ${p.ready ? "" : `<div class="warn">The AI is not set up yet. <button class="link" id="home-settings">Open Settings</button></div>`}
       <div class="tips">
         <div><b>From your phone</b><span>${STATE.telegram.paired ? `Send a voice message or a recording to <b>@${esc(STATE.telegram.bot)}</b> in Telegram.` : `Connect a Telegram bot in <button class="link inline" id="tip-tg">Settings</button> and send recordings to it.`} Or open this page on the phone and add it to the Home Screen.</span></div>
-        <div><b>A bot in your calls</b><span>${STATE.calendars ? `The bot joins the calls in your calendar — see <a href="#/calls">Calls</a>.` : `Connect your calendar in <a href="#/calls">Calls</a> and the bot joins every Meet, Zoom, Teams or Telemost call by itself — or send it to one by link.`}</span></div>
+        <div><b>A bot that joins your calls</b><span>${STATE.calendars ? `The bot joins the calls in your calendar by itself. For any other call, paste its link in <a href="#/calls">Calls</a>.` : `Connect your calendar (an iCal link) or paste a call link in <a href="#/calls">Calls</a>, and the bot joins by itself: Meet, Zoom, Teams, Telemost, Zoho.`} The host may have to let it in from the lobby; Zoom goes through its web client.</span></div>
       </div>
       <p class="fine">Recording other people? Tell them first — in many places it's required by law.</p>
     </section>`;
