@@ -206,8 +206,15 @@ async def uno_callback(request: Request):
         resp = _login_failed(exc.code)
         clear_cookie(resp, request, sso.TX_COOKIE, path="/auth/uno/")
         return resp
-    who = "the owner" if sso.owner_sub() and claims.get("sub") == sso.owner_sub() else "a person the app is shared with"
-    log.info("Signed in with Uno: %s (%s)", claims.get("sub"), who)
+    # Only the owner (Misha 17.10): Notetaker has no users of its own, so a
+    # person the app is shared with would see every meeting. No owner sub
+    # configured = nobody gets in through Uno (the owner password still works).
+    if not sso.owner_sub() or claims.get("sub") != sso.owner_sub():
+        log.warning("Sign in with Uno refused: %s is not the owner", claims.get("sub"))
+        resp = _login_failed("not_owner")
+        clear_cookie(resp, request, sso.TX_COOKIE, path="/auth/uno/")
+        return resp
+    log.info("Signed in with Uno: %s (the owner)", claims.get("sub"))
     resp = RedirectResponse(f"{sso.DONE_PATH}?next={quote(tx['x'])}", status_code=303,
                             headers={"Cache-Control": "no-store"})
     set_cookie(resp, request, COOKIE, _session_value(), SESSION_TTL)

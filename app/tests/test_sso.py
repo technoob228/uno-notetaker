@@ -305,6 +305,19 @@ class TestSignInWithUno(SSOBase):
         _, loc = self.go_to_uno()
         self.assert_failed(self.callback(self.come_back(loc)), "token")
 
+    def test_someone_else_is_refused(self):
+        self.fake.claims_override = {"sub": "uno-2606"}
+        _, loc = self.go_to_uno()
+        self.assert_failed(self.callback(self.come_back(loc)), "not_owner")
+
+    def test_no_owner_configured_lets_nobody_in(self):
+        os.environ["UNO_OIDC_OWNER_SUB"] = ""
+        try:
+            _, loc = self.go_to_uno()
+            self.assert_failed(self.callback(self.come_back(loc)), "not_owner")
+        finally:
+            os.environ["UNO_OIDC_OWNER_SUB"] = OWNER_SUB
+
     def test_uno_said_no(self):
         _, loc = self.go_to_uno()
         state = parse_qs(urlparse(loc).query)["state"][0]
