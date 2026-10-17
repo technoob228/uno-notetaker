@@ -8,3 +8,4 @@ sherpa-onnx==1.13.8
 icalendar==7.3.0
 recurring-ical-events==3.8.2
 x-wr-timezone==2.0.1
+PyJWT[crypto]==2.10.1

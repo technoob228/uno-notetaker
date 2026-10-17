@@ -16,13 +16,14 @@ import time
 from collections import defaultdict
 from urllib.parse import quote
 
+import httpx
 import markdown as md
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import actions, ai, bot, calendars, deliver, pipeline, store, telegram
+from . import actions, ai, bot, calendars, deliver, pipeline, sso, store, telegram
 from .config import (ADMIN_PASSWORD, APP_URL, APP_VERSION, MODEL_CHOICES, ROUTE_APP, ai_provider,
                      cookie_secret, load_settings, notes_model, save_settings)
 
@@ -60,12 +61,63 @@ def _session_ok(request: Request) -> bool:
 _attempts: dict[str, list[float]] = defaultdict(list)
 PUBLIC_PREFIXES = ("/login", "/s/", "/static/", "/healthz", "/favicon", "/manifest.webmanifest", "/sw.js",
                    "/widget", "/m/", "/share-target",
+                   "/auth/uno/",  # Sign in with Uno (sso.py)
                    "/api/bot/worker/")  # the bot container: its own token, checked in each handler
+UNSAFE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+
+
+def _https(request: Request) -> bool:
+    """The browser is on https (uvicorn --proxy-headers takes X-Forwarded-Proto)."""
+    return request.url.scheme == "https" or \
+        request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+
+
+def _cross_site_write(request: Request) -> bool:
+    """A browser write from another origin. Over https the cookies are SameSite=None
+    (they must work inside Uno Work's frame), so the browser no longer keeps them
+    off cross-site forms — this check does. No Origin = not a browser (the bot,
+    curl, agents on the computer): allowed, they have no cookie to abuse."""
+    if request.method not in UNSAFE_METHODS:
+        return False
+    origin = request.headers.get("origin", "")
+    if not origin:
+        return False
+    if request.headers.get("sec-fetch-site", "") in ("same-origin", "none"):  # "none": the person did it (share sheet)
+        return False
+    hosts = {h.strip().lower() for h in (request.headers.get("host", ""),
+                                         request.headers.get("x-forwarded-host", "").split(",")[0]) if h.strip()}
+    o = origin.lower()
+    return not any(o in (f"https://{h}", f"http://{h}") for h in hosts)
+
+
+def set_cookie(resp: Response, request: Request, name: str, value: str, max_age: int, path: str = "/") -> None:
+    """Over https: Secure; HttpOnly; SameSite=None; Partitioned — the sign-in has to
+    hold inside Uno Work's frame (another site: Lax cookies never reach a
+    cross-site frame; CHIPS keeps them in that frame's partition). Starlette
+    can write Partitioned only on Python 3.14+, so the header is built here.
+    Over plain http (local development) — Lax, as before."""
+    if _https(request):
+        resp.headers.append("set-cookie", f"{name}={value}; Max-Age={max_age}; Path={path}; "
+                                          "Secure; HttpOnly; SameSite=None; Partitioned")
+    else:
+        resp.set_cookie(name, value, max_age=max_age, path=path, httponly=True, samesite="lax")
+
+
+def clear_cookie(resp: Response, request: Request, name: str, path: str = "/") -> None:
+    set_cookie(resp, request, name, "", 0, path)
+
+
+def _session_value() -> str:
+    ts = str(int(time.time()))
+    pw_tag = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest()[:12]
+    return f"v1.{ts}.{_sign(f'v1.{ts}.{pw_tag}')}"
 
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
     path = request.url.path
+    if _cross_site_write(request):
+        return JSONResponse({"error": "cross-site request"}, status_code=403)
     if not path.startswith(PUBLIC_PREFIXES) and path != "/" and not _session_ok(request):
         return JSONResponse({"error": "login required"}, status_code=401)
     resp = await call_next(request)
@@ -90,19 +142,86 @@ async def login(request: Request):
     if not ADMIN_PASSWORD or not hmac.compare_digest(str(body.get("password", "")), ADMIN_PASSWORD):
         _attempts[ip].append(now)
         return JSONResponse({"error": "Wrong password"}, status_code=401)
-    ts = str(int(now))
-    pw_tag = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest()[:12]
     resp = JSONResponse({"ok": True})
-    resp.set_cookie(COOKIE, f"v1.{ts}.{_sign(f'v1.{ts}.{pw_tag}')}", max_age=SESSION_TTL, httponly=True,
-                    secure=request.headers.get("x-forwarded-proto") == "https", samesite="lax")
+    set_cookie(resp, request, COOKIE, _session_value(), SESSION_TTL)
     return resp
 
 
 @app.post("/api/logout")
-async def logout():
+async def logout(request: Request):
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie(COOKIE)
+    clear_cookie(resp, request, COOKIE)
     return resp
+
+
+# ---- Sign in with Uno (OIDC, see sso.py) -------------------------------------------
+
+def _login_page(request: Request) -> HTMLResponse:
+    """login.html; data-sso tells it to offer "Sign in with Uno" first."""
+    page = _page("login.html")
+    if sso.enabled():
+        page = page.replace('data-sso="0"', 'data-sso="1"', 1)
+    return HTMLResponse(page, headers={"Cache-Control": "no-store"})
+
+
+def _login_failed(code: str) -> RedirectResponse:
+    # Only a fixed code goes to the page — it maps codes to its own texts.
+    return RedirectResponse(f"/login?password=1&error={quote(code)}", status_code=303,
+                            headers={"Cache-Control": "no-store"})
+
+
+@app.get(sso.START_PATH)
+async def uno_start(request: Request, next: str = "/"):
+    if not sso.enabled():
+        return RedirectResponse("/", status_code=303)
+    if not _https(request):
+        # The console sends codes only to the app's https address: go there first.
+        if APP_URL.startswith("https://"):
+            return RedirectResponse(APP_URL.rstrip("/") + sso.START_PATH + "?next=" + quote(sso.safe_next(next)),
+                                    status_code=303)
+        return _login_failed("https")
+    redirect_uri = str(request.base_url).rstrip("/") + sso.CALLBACK_PATH
+    try:
+        async with httpx.AsyncClient(timeout=sso.HTTP_TIMEOUT) as client:
+            meta = await sso.metadata(client)
+    except sso.SSOError as exc:
+        log.warning("Sign in with Uno: %s", exc)
+        return _login_failed(exc.code)
+    tx, challenge = sso.new_transaction(redirect_uri, next)
+    resp = RedirectResponse(sso.authorize_url(meta, tx, challenge), status_code=303,
+                            headers={"Cache-Control": "no-store"})
+    set_cookie(resp, request, sso.TX_COOKIE, sso.pack_tx(cookie_secret(), tx), sso.TX_TTL, path="/auth/uno/")
+    return resp
+
+
+@app.get(sso.CALLBACK_PATH)
+async def uno_callback(request: Request):
+    if not sso.enabled():
+        return RedirectResponse("/", status_code=303)
+    tx = sso.unpack_tx(cookie_secret(), request.cookies.get(sso.TX_COOKIE, ""))
+    try:
+        claims = await sso.finish(dict(request.query_params), tx)
+    except sso.SSOError as exc:
+        log.warning("Sign in with Uno failed (%s): %s", exc.code, exc)
+        resp = _login_failed(exc.code)
+        clear_cookie(resp, request, sso.TX_COOKIE, path="/auth/uno/")
+        return resp
+    who = "the owner" if sso.owner_sub() and claims.get("sub") == sso.owner_sub() else "a person the app is shared with"
+    log.info("Signed in with Uno: %s (%s)", claims.get("sub"), who)
+    resp = RedirectResponse(f"{sso.DONE_PATH}?next={quote(tx['x'])}", status_code=303,
+                            headers={"Cache-Control": "no-store"})
+    set_cookie(resp, request, COOKIE, _session_value(), SESSION_TTL)
+    clear_cookie(resp, request, sso.TX_COOKIE, path="/auth/uno/")
+    return resp
+
+
+@app.get(sso.DONE_PATH)
+async def uno_done(request: Request, next: str = "/"):
+    if _session_ok(request):
+        return RedirectResponse(sso.safe_next(next), status_code=303, headers={"Cache-Control": "no-store"})
+    # The cookie set a moment ago did not come back: the browser blocks it (a
+    # frame in a strict browser). Starting over would loop forever.
+    return _login_failed("cookie")
 
 
 # ---- pages -----------------------------------------------------------------
@@ -120,8 +239,11 @@ def _page(name: str) -> str:
 
 @app.get("/")
 async def index(request: Request):
-    page = "index.html" if _session_ok(request) else "login.html"
-    return HTMLResponse(_page(page), headers={"Cache-Control": "no-store"})
+    if _session_ok(request):
+        return HTMLResponse(_page("index.html"), headers={"Cache-Control": "no-store"})
+    if sso.enabled():
+        return RedirectResponse(sso.START_PATH, status_code=303, headers={"Cache-Control": "no-store"})
+    return _login_page(request)
 
 
 @app.get("/healthz")
@@ -833,5 +955,11 @@ async def favicon():
 
 
 @app.get("/login")
-async def login_page():
-    return RedirectResponse("/")
+async def login_page(request: Request):
+    """With Sign in with Uno the login page goes to Uno at once; ?password=1 is
+    the fallback (the owner password from the app card) and where failures land."""
+    if not sso.enabled():
+        return RedirectResponse("/")
+    if "password" not in request.query_params and "error" not in request.query_params:
+        return RedirectResponse(sso.START_PATH, status_code=303, headers={"Cache-Control": "no-store"})
+    return _login_page(request)

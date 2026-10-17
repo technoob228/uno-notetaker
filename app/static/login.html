@@ -9,26 +9,65 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-sso="0">
 <main class="login">
-  <form id="f" class="dlg" style="max-width:380px;width:calc(100% - 32px);margin:14vh auto;background:#fff;border:1px solid var(--line);border-radius:16px">
+  <div class="dlg" style="max-width:380px;width:calc(100% - 32px);margin:14vh auto;background:#fff;border:1px solid var(--line);border-radius:16px">
     <h2 style="display:flex;gap:10px;align-items:center"><img src="/static/icon.svg" alt="" width="28" height="28" style="border-radius:7px"> Notetaker</h2>
-    <p class="muted" style="margin:0">Enter the password from the app card in Uno Work.</p>
-    <label class="field">Password <input type="password" name="password" autofocus required autocomplete="current-password"></label>
     <p class="bad" id="err" style="color:var(--bad);margin:0" hidden></p>
-    <button class="btn primary">Sign in</button>
-  </form>
+    <div id="uno" hidden>
+      <a class="btn primary" href="/auth/uno/start" style="display:block;text-align:center;text-decoration:none">Sign in with Uno</a>
+      <p class="muted" style="margin:10px 0 0"><a href="#" id="use-pw">Use the owner password</a></p>
+    </div>
+    <form id="f" style="display:flex;flex-direction:column;gap:12px">
+      <p class="muted" id="pw-hint" style="margin:0">Enter the password from the app card in Uno Work.</p>
+      <label class="field">Password <input type="password" name="password" required autocomplete="current-password"></label>
+      <p class="bad" id="pw-err" style="color:var(--bad);margin:0" hidden></p>
+      <button class="btn primary">Sign in</button>
+    </form>
+  </div>
 </main>
 <script>
-document.getElementById("f").onsubmit = async (e) => {
-  e.preventDefault();
-  const r = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password: e.target.password.value }) });
-  if (r.ok) { location.reload(); return; }
-  const err = document.getElementById("err");
-  err.hidden = false;
-  err.textContent = (await r.json().catch(() => ({}))).error || "Could not sign in";
-};
+(() => {
+  const q = new URLSearchParams(location.search);
+  const sso = document.body.dataset.sso === "1";
+  const form = document.getElementById("f");
+  // Fixed texts per code: nothing from the address bar lands on the page as is.
+  const ERRORS = {
+    denied: "Uno didn't let you in: this app isn't shared with your Uno account. Ask the owner to share it, or use the owner password.",
+    expired: "The sign-in took too long or was opened in another tab. Try again.",
+    state: "The sign-in took too long or was opened in another tab. Try again.",
+    cookie: "Your browser blocked the sign-in inside this frame. Open the app in its own tab, or use the owner password.",
+    https: "Sign in with Uno works on the app's https address. Use the owner password here.",
+    issuer: "Uno couldn't confirm who you are. Try again.",
+    token: "Uno couldn't confirm who you are. Try again.",
+    provider: "Uno isn't answering right now. Try again in a minute, or use the owner password.",
+  };
+  const code = q.get("error");
+  if (code) {
+    const err = document.getElementById("err");
+    err.hidden = false;
+    err.textContent = ERRORS[code] || "Could not sign in. Try again.";
+  }
+  if (sso) {
+    document.getElementById("uno").hidden = false;
+    document.getElementById("pw-hint").textContent = "The owner password is on the app card in Uno Work.";
+    const showPw = () => { document.querySelector("#uno a").className = "btn"; form.hidden = false; form.style.display = "flex"; form.password.focus(); document.getElementById("use-pw").parentElement.hidden = true; };
+    form.hidden = true; form.style.display = "none";
+    document.getElementById("use-pw").onclick = (e) => { e.preventDefault(); showPw(); };
+    if (q.has("password") && !code) showPw();
+  } else {
+    form.password.focus();
+  }
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: form.password.value }) });
+    if (r.ok) { location.href = "/"; return; }
+    const err = document.getElementById("pw-err");
+    err.hidden = false;
+    err.textContent = (await r.json().catch(() => ({}))).error || "Could not sign in";
+  };
+})();
 </script>
 </body>
 </html>

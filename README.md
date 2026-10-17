@@ -107,7 +107,7 @@ Elsewhere: set `UNO_HOME` to a folder for `Meetings`, and either
 ## Layout
 
 ```
-app/notetaker/   FastAPI backend: config (keys, AI route), audio (ffmpeg), ai (STT/LLM),
+app/notetaker/   FastAPI backend: config (keys, AI route), sso (Sign in with Uno), audio (ffmpeg), ai (STT/LLM),
                  pipeline (recording → transcript → notes), store (~/Meetings, search),
                  actions (action items from notes.md), deliver (Inbox, tasks), telegram (bot),
                  calendars (iCal → calls), bot (the call bot's sessions, its API),
@@ -122,8 +122,22 @@ testdata/        TTS test meetings (RU/EN) + smoke.py (end-to-end over the API)
 
 ## Security
 
+- **Sign in with Uno** (0.4.2): with `UNO_OIDC_*` in the environment (the App
+  Store registers each install as an OIDC client of the Uno console and passes
+  them) the app goes straight to Uno — `/auth/uno/start` → the console →
+  `/auth/uno/callback` (authorization code + PKCE S256, state, nonce; the
+  `id_token` is checked: RS256 against the console's JWKS, iss, aud/azp, exp).
+  The console lets in only the computer's owner and people they shared the app
+  with. A good sign-in sets the same session cookie as the password. The
+  password stays as the fallback: `/login?password=1` ("Use the owner
+  password"); sign-in errors land there too. Without `UNO_OIDC_*` — password
+  only, as before. Code: `app/notetaker/sso.py`, tests: `app/tests/test_sso.py`.
 - `ADMIN_PASSWORD` is required (the container refuses to start without it); a
   signed session cookie, 10 wrong passwords per 5 minutes per IP.
+- Over https the cookies are `Secure; HttpOnly; SameSite=None; Partitioned` —
+  sign-in has to hold inside Uno Work's frame (another site). So the browser no
+  longer stops cross-site forms: every POST/PUT/PATCH/DELETE carrying an
+  `Origin` of another origin is refused (403). Over plain http — `SameSite=Lax`.
 - Shared links are random 24-char tokens, revocable; the public page has a
   `default-src 'none'` CSP (notes are Markdown written by an LLM or the owner).
 - The container drops root after fixing folder ownership and runs as the
