@@ -19,7 +19,7 @@ from .api import APP, Api, ApiError, read_token
 from .capture import setup_pulse
 from .session import Session
 
-VERSION = "0.4.2"
+VERSION = "0.5.1"
 MAX_CALLS = max(1, int(os.environ.get("MAX_CALLS", "2")))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

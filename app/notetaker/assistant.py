@@ -247,9 +247,12 @@ def pending() -> list[dict]:
 # ---- call statuses → events ---------------------------------------------------------------
 
 REASONS = [
+    # The bot's "couldn't find the join button" carries a dump of the page — classify it
+    # before anything else, or a "Sign in" link on the page reads as sign-in-required.
+    ("no_join_button", re.compile(r"(?i)^could not find how to join")),
     ("waiting_room", re.compile(r"(?i)nobody let|let you in|no one responded|waiting room|lobby")),
     ("denied", re.compile(r"(?i)denied|declined|removed|не впустил|отклонил")),
-    ("sign_in_required", re.compile(r"(?i)sign in|signed-in|войдите|log in")),
+    ("sign_in_required", re.compile(r"(?i)sign in to join|signed-in|войдите|log in to join")),
     ("meeting_not_found", re.compile(r"(?i)check your meeting code|can't find this meeting|invalid|expired|"
                                      r"такого звонка нет|not found|has ended|meeting id")),
     ("captcha", re.compile(r"(?i)captcha|robot")),
@@ -289,6 +292,7 @@ def status_text(x: dict, bot: str) -> str:
         "sign_in_required": f"Couldn't join {title}: the call only lets signed-in people in",
         "meeting_not_found": f"Couldn't join {title}: the call link doesn't work (ended or wrong)",
         "captcha": f"Couldn't join {title}: the call asked for a captcha",
+        "no_join_button": f"Couldn't join {title}: {bot} didn't find the join button on the call page",
         "bot_offline": f"Couldn't join {title}: the notetaker on the computer isn't running",
         "moved": f"{title} moved — {bot} will come at the new time",
         "cancelled": f"{title} was cancelled — {bot} won't go",

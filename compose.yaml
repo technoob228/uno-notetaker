@@ -40,7 +40,7 @@ services:
       - ${UNO_HOME:-/home/unowork}:/host
   notetaker:
     build: ./app
-    image: uno-notetaker:0.5.0
+    image: uno-notetaker:0.5.1
     restart: unless-stopped
     depends_on:
       uno-dirs: {condition: service_completed_successfully}
@@ -85,7 +85,7 @@ services:
   # It talks only to the app (and the call sites) and holds no keys.
   bot:
     build: ./bot
-    image: uno-notetaker-bot:0.5.0
+    image: uno-notetaker-bot:0.5.1
     restart: unless-stopped
     depends_on: [notetaker]
     environment:

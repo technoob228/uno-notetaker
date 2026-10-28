@@ -66,7 +66,9 @@ MEET = Meet(
             r"^I understand$"],
     name_field=[r"^Your name$", r"What's your name"],
     mute=[r"^Turn off microphone", r"^Turn off camera"],
-    join=[r"^Ask to join$", r"^Join now$", r"^Join anyway$"],
+    # Meet names the button by what you join with: "Ask to join without camera" when the
+    # computer has no camera (always true for the bot), so match the start only.
+    join=[r"^Ask to join", r"^Join now", r"^Join anyway"],
     lobby=[r"Asking to join", r"Please wait until a meeting host brings you", r"when someone lets you in",
            r"Someone will let you in"],
     in_call=[r"^Leave call$"],

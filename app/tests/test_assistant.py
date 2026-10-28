@@ -307,6 +307,12 @@ class AssistantCalls(unittest.TestCase):
         self.assertEqual(r("not_admitted", "Google Meet: denied your request"), "denied")
         self.assertEqual(r("failed", "The bot never picked this call up — is the bot container running?"), "bot_offline")
         self.assertEqual(r("failed", "weird"), "error")
+        # 28.10 live: the page dump has a "Sign in" link — that is not a sign-in-only call
+        dump = ("Could not find how to join on the page (Sign in · Camera is off · more_vert · More options · "
+                "mic_off · Turn on microphone (ctrl + d))")
+        self.assertEqual(r("failed", dump), "no_join_button")
+        self.assertEqual(assistant.status_text({"status": "failed", "detail": dump, "title": "Sync"}, "Ada (Uno notes)"),
+                         "Couldn't join Sync: Ada (Uno notes) didn't find the join button on the call page")
         self.assertEqual(r("cancelled", "", "moved"), "moved")
         self.assertEqual(r("recording", "x"), "")
 
