@@ -382,6 +382,22 @@ class Client:
             payload["group"] = group
         return self._json("POST", "/v1/notify", payload)
 
+    # -- the assistant's calls (manifest "calls": true)
+
+    def assistant_link(self) -> Dict[str, Any]:
+        """Is an assistant sending this app to the person's calls? (Join my calls in Uno Work.)"""
+        return self._json("GET", "/v1/assistant/link", timeout=15.0)
+
+    def calendar_events(self, start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Any]:
+        """The person's calendar (Google, through Uno) as JSON — only while Join my calls is on."""
+        q = {k: v for k, v in (("from", start), ("to", end)) if v}
+        suffix = ("?" + urllib.parse.urlencode(q)) if q else ""
+        return self._json("GET", "/v1/calendar/events" + suffix, timeout=45.0)
+
+    def assistant_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Tell the assistant what happened: {"id", "kind", "at", ...} (see docs/app-sdk.md)."""
+        return self._json("POST", "/v1/assistant/events", event, timeout=20.0)
+
     @property
     def storage(self) -> "Storage":
         """The app's own folder in the account's cloud (manifest "storage")."""

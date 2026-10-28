@@ -308,13 +308,16 @@ async function renderCalls() {
   }).join("");
   const noLink = d.upcoming.filter((e) => !e.url && new Date(e.end) > new Date()).length;
   const cals = d.calendars.map((c) => `<li><b>${esc(c.name || "Calendar")}</b> <span class="muted">${esc(c.where)} · ${c.error ? `<span class="bad">${esc(c.error)}</span>` : `${plural(c.events, "event")} this week`}</span>
-      <button class="link danger small" data-cal-del="${c.id}">Remove</button></li>`).join("");
+      ${c.kind === "uno" ? `<span class="muted small">· turn off in Uno Work</span>` : `<button class="link danger small" data-cal-del="${c.id}">Remove</button>`}</li>`).join("");
+  // An assistant in Uno Work sends this Notetaker to the person's calls ("Join my calls").
+  const asst = STATE.assistant && STATE.assistant.active ? STATE.assistant : null;
   const recent = d.recent.map((x) => `<div class="ev past">
       <span class="ev-time">${fmtDate(new Date(x.created_at * 1000).toISOString()).replace(/^Today, /, "")}</span>
       <span class="ev-title">${esc(x.title || "Call")} ${platformTag(x.platform)}<br><span class="st st-${x.status}">${esc(CALL_STATUS[x.status] || x.status)}</span> <span class="muted">· ${esc(x.detail || "")}</span>
         ${x.meeting_id ? ` <a href="#/m/${x.meeting_id}">notes →</a>` : ""}${x.screenshot ? ` <a href="/api/calls/sessions/${x.id}/screenshot" target="_blank" rel="noopener">what the bot saw</a>` : ""}</span>
     </div>`).join("");
-  const mode = { all: "joins every call with a link", accepted: "joins calls you accepted or organize", off: "joins only when you send it" }[STATE.settings.bot_auto_join] || "";
+  const mode = asst ? "joins meetings you're in with someone else (set by your assistant)"
+    : { all: "joins every call with a link", accepted: "joins calls you accepted or organize", off: "joins only when you send it" }[STATE.settings.bot_auto_join] || "";
   $("#main").innerHTML = `
     <section class="page calls">
       <header class="page-head">
@@ -323,6 +326,7 @@ async function renderCalls() {
         <button class="btn primary" id="btn-send-bot">Send the bot to a call</button>
       </header>
       ${bot}
+      ${asst ? `<p class="fine">Your assistant <b>${esc(asst.assistant || "")}</b> in Uno Work sends this notetaker to your calls as “${esc(asst.bot_name)}”. The notes go to it, your Inbox and Telegram. Turn it off in Uno Work → the assistant → Join my calls.</p>` : ""}
       ${active ? `<h3>Now</h3>${active}` : ""}
       <h3>Coming up ${d.calendars.length ? `<span class="muted small">· the bot ${esc(mode)} · <button class="link small" id="calls-settings">change</button></span>` : ""}</h3>
       ${d.calendars.length ? (upcoming || `<p class="muted">No calls with a link in the next 7 days.</p>`) + (noLink ? `<p class="fine">${plural(noLink, "event")} without a call link — the bot has nowhere to go.</p>` : "")
@@ -330,7 +334,7 @@ async function renderCalls() {
       ${d.calendars.length ? `<h3>Calendars</h3><ul class="cals">${cals}</ul>
         <div class="row-btns"><button class="btn" id="btn-cal-add">Add a calendar</button><button class="link" id="btn-cal-refresh">Check now</button></div>` : ""}
       ${recent ? `<h3>Recent</h3>${recent}` : ""}
-      <p class="fine">The bot joins as a guest named “${esc(STATE.settings.bot_name || "Uno Notetaker")}”, so the host may have to let it in. It leaves when the call ends, when everyone else has left or after a long silence. KakaoTalk group calls have no link to open in a browser — the bot can't join those.</p>
+      <p class="fine">The bot joins as a guest named “${esc((asst && asst.bot_name) || STATE.settings.bot_name || "Uno Notetaker")}”, so the host may have to let it in. It leaves when the call ends, when everyone else has left or after a long silence. KakaoTalk group calls have no link to open in a browser — the bot can't join those.</p>
     </section>`;
   $("#btn-send-bot").onclick = openBotDialog;
   for (const id of ["#btn-cal-first", "#btn-cal-add"]) if ($(id)) $(id).onclick = () => { $("#cal-url").value = ""; $("#dlg-calendar").showModal(); };

@@ -24,9 +24,9 @@ import re
 import secrets
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from . import calendars, pipeline, store
+from . import assistant, calendars, pipeline, store
 from .config import STATE_DIR, cookie_secret, load_settings
 
 log = logging.getLogger("notetaker.bot")
@@ -115,16 +115,36 @@ def _update(sid: str, **changes) -> dict | None:
     return None
 
 
+def _overlaps(x: dict, event: dict) -> bool:
+    """Was session x for a call at the time of this event (the same meeting
+    twice in the calendars — two invitations, two calendars)?"""
+    try:
+        xs = datetime.fromisoformat(x.get("start") or "")
+        es, ee = datetime.fromisoformat(event["start"]), datetime.fromisoformat(event["end"])
+    except (KeyError, ValueError):
+        return False
+    return es - timedelta(minutes=15) <= xs < ee
+
+
 def create(url: str, title: str = "", event: dict | None = None) -> dict:
-    """A call for the bot to join (now). Refuses a second bot in the same call."""
+    """A call for the bot to join (now). Never a second bot in the same call:
+    the same link (in any of its forms) while a bot is there; the same
+    calendar occurrence once — unless it moved to another time and the bot
+    hadn't got in (then it goes at the new time)."""
     platform = calendars.platform_of(url)
+    same = calendars.canonical(url)
     with _lock:
         all_ = _load()
         for x in all_:
-            if x["status"] in ACTIVE and x["url"] == url:
+            if x["status"] in ACTIVE and calendars.canonical(x["url"]) == same:
                 return x
             if event and x.get("event_key") == event["key"]:
-                return x  # once per occurrence, whatever happened (the person can send it again by hand)
+                moved = x.get("start") and x.get("start") != event.get("start")
+                if not moved or x["status"] in ACTIVE or x.get("meeting_id"):
+                    return x  # once per occurrence (the person can send it again by hand)
+            elif event and x.get("event_key") and calendars.canonical(x["url"]) == same and _overlaps(x, event) \
+                    and x["status"] not in ("cancelled",):
+                return x  # the same call from another calendar entry
         now = int(time.time())
         x = {
             "id": secrets.token_hex(5), "url": url, "platform": platform,
@@ -167,14 +187,25 @@ def worker_status() -> dict:
 
 # ---- what the bot container calls ----------------------------------------------
 
+def bot_identity() -> tuple[str, str]:
+    """(the name in the call, the hello in its chat). An assistant's bot says
+    whose it is: "Ada (Uno notes)", "…to take notes for Misha"."""
+    s = load_settings()
+    name = (assistant.bot_name() or s.bot_name).strip()[:60] or "Uno Notetaker"
+    owner = assistant.owner_name()
+    whom = owner if owner else "the person who invited me"
+    hello = (f"Hi! I'm {name}: I record and transcribe this call to take notes for {whom}. "
+             "Remove me from the call to stop the recording.")
+    return name, hello if s.bot_chat_message else ""
+
+
 def _job(x: dict) -> dict:
     s = load_settings()
     end = x.get("end") or ""
+    name, hello = bot_identity()
     return {"id": x["id"], "url": x["url"], "platform": x["platform"], "title": x["title"],
-            "name": s.bot_name.strip()[:60] or "Uno Notetaker",
-            "chat_message": (f"Hi! I'm {s.bot_name or 'Uno Notetaker'}: I record and transcribe this call "
-                             "to take notes for the person who invited me. Remove me from the call to stop "
-                             "the recording.") if s.bot_chat_message else "",
+            "name": name,
+            "chat_message": hello,
             "lobby_wait_s": max(60, min(60 * 60, s.bot_lobby_wait_min * 60)),
             "end": end,
             # how long at most: the scheduled end + 1 h, a call without a schedule 4 h
@@ -272,6 +303,7 @@ def _new_meeting(x: dict) -> str:
     tz = s.tz_offset_min if -900 <= s.tz_offset_min <= 900 else None
     m = store.create(x.get("title") or "", "bot", s.template, s.language, tz)
     store.update(m["id"], call={"platform": x["platform"], "url": x["url"], "session": x["id"],
+                                "event_key": x.get("event_key", ""),
                                 "start": x.get("start", ""), "end": x.get("end", "")},
                  attendees=x.get("attendees") or [], progress="The bot is in the call, recording…")
     return m["id"]
@@ -332,6 +364,10 @@ def finish(sid: str, outcome: str, detail: str = "") -> dict:
             outcome = "failed"
     defaults = {"done": "Left the call — writing notes", "failed": "Could not join",
                 "not_admitted": "Nobody let the bot in"}
+    if outcome == "failed" and x.get("reason") in CALENDAR_REASONS and not mid:
+        # We sent it away (the meeting moved, was cancelled or turned off).
+        return _update(sid, status="cancelled", detail=x.get("detail") or "Not going", stop=False,
+                       left_at=int(time.time())) or {}
     return _update(sid, status=outcome, detail=(detail or defaults[outcome])[:300], stop=False,
                    left_at=int(time.time())) or {}
 
@@ -339,6 +375,57 @@ def finish(sid: str, outcome: str, detail: str = "") -> dict:
 def _finish_meeting(mid: str) -> None:
     store.update(mid, status="queued", progress="Waiting in line…")
     pipeline.enqueue(mid, "full")
+
+
+# ---- the calendar changed under a call ------------------------------------------------
+
+CALENDAR_REASONS = ("moved", "cancelled", "declined", "turned_off")
+MOVED_LATER = timedelta(minutes=10)
+
+
+def reconcile(now: datetime | None = None) -> int:
+    """A meeting the bot is about to join (queued, opening, in the lobby) was
+    cancelled, moved to later, declined or turned off: don't go / leave the
+    lobby. A bot already recording stays — people may be in the call
+    whatever the calendar says. → how many sessions changed."""
+    now = now or datetime.now(timezone.utc)
+    events = {e["key"]: e for e in calendars.upcoming(include_past_hours=24)}
+    known_cals = {c["id"] for c in calendars.calendars()}
+    changed = 0
+    for x in sessions():
+        key = x.get("event_key")
+        if not key or x["status"] not in ("queued", "joining", "lobby") or x.get("stop"):
+            continue
+        ev = events.get(key)
+        reason, detail = "", ""
+        if ev is None:
+            if not known_cals:
+                reason, detail = "turned_off", "Not going: the calendar is no longer connected"
+            elif calendars.loaded():
+                reason, detail = "cancelled", "Not going: the meeting is gone from the calendar"
+        elif ev.get("status") == "CANCELLED":
+            reason, detail = "cancelled", "Not going: the meeting was cancelled"
+        elif not ev.get("join"):
+            why = ev.get("why", "")
+            reason = "declined" if "declined" in why else "turned_off"
+            detail = f"Not going: {why}"
+        else:
+            try:
+                new_start = datetime.fromisoformat(ev["start"])
+                old_start = datetime.fromisoformat(x.get("start") or ev["start"])
+            except ValueError:
+                new_start = old_start = now
+            if new_start - old_start >= MOVED_LATER and now < new_start - timedelta(minutes=5):
+                reason, detail = "moved", f"Not going now: the meeting moved to {ev['start']}"
+        if not reason:
+            continue
+        if x["status"] == "queued":
+            _update(x["id"], status="cancelled", reason=reason, detail=detail)
+        else:
+            _update(x["id"], stop=True, reason=reason, detail=detail)
+        log.info("bot session %s: %s (%s)", x["id"], reason, x.get("title"))
+        changed += 1
+    return changed
 
 
 # ---- watchdog ---------------------------------------------------------------------

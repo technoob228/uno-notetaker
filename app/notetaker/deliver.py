@@ -53,12 +53,23 @@ def after_notes(mid: str) -> None:
     m = store.get(mid) or {}
     if m.get("delivery", {}).get("at"):
         return
-    from . import telegram  # late: telegram imports the pipeline
+    from . import assistant, telegram  # late: telegram imports the pipeline
     s = load_settings()
     out: dict = {"at": int(time.time())}
+    from_telegram = bool((m.get("telegram") or {}).get("chat_id"))
+    if assistant.active() and m.get("source") == "bot":
+        # The assistant sent the bot: the notes go to it (its turn, the Inbox,
+        # Telegram — Uno Work does all three), so the person gets one message.
+        ev = assistant.emit("meeting.notes",
+                            assistant.meeting_notes_event(m, store.read_text(mid, "notes.md"),
+                                                          actions.for_meeting(mid)),
+                            event_id=f"notes-{mid}")
+        out["assistant"] = "queued" if ev else "off"
+        store.update(mid, delivery=out)
+        log.info("meeting %s → the assistant %s", mid, assistant.assistant_name())
+        return
     if s.notify_inbox:
         out["inbox"] = notify_inbox(mid)
-    from_telegram = bool((m.get("telegram") or {}).get("chat_id"))
     if (s.notify_telegram or from_telegram) and telegram.ready():
         try:
             telegram.send_notes(mid)
@@ -70,8 +81,15 @@ def after_notes(mid: str) -> None:
 
 
 def after_error(mid: str) -> None:
-    """A Telegram recording failed: say so in the chat it came from."""
+    """A recording failed: tell the assistant (a call it sent the bot to), or
+    say so in the Telegram chat it came from."""
     m = store.get(mid) or {}
+    from . import assistant
+    if assistant.active() and m.get("source") == "bot":
+        assistant.emit("meeting.error", {"meeting_id": mid, "title": m.get("title") or "Meeting",
+                                         "error": str(m.get("error") or "")[:300],
+                                         "open": {"app": True, "path": f"/m/{mid}"}},
+                       event_id=f"error-{mid}")
     tg = m.get("telegram") or {}
     if not tg.get("chat_id"):
         return

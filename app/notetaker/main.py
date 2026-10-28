@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import actions, ai, bot, calendars, deliver, pipeline, sso, store, telegram
+from . import actions, ai, assistant, bot, calendars, deliver, pipeline, sso, store, telegram
 from .config import (ADMIN_PASSWORD, APP_URL, APP_VERSION, MODEL_CHOICES, ROUTE_APP, ai_provider,
                      cookie_secret, load_settings, notes_model, save_settings)
 
@@ -285,6 +285,7 @@ def _state() -> dict:
         "uno_work": p.route == ROUTE_APP, "inbox": deliver.inbox_available(),
         "telegram": telegram.status(),
         "bot": bot.worker_status(), "calendars": len(calendars.calendars()),
+        "assistant": assistant.status(),
     }
 
 
@@ -928,6 +929,10 @@ def write_manifest() -> None:
                 "ai": {"chat": True, "tasks": True, "limitUsd": 10},
                 # "Notes ready: … · 3 action items" in the Uno Work Inbox.
                 "notify": True,
+                # "Join my calls" of an assistant in Uno Work: the link (which assistant,
+                # the bot's name), the person's calendar through Uno, and what happened
+                # in a call / the notes going to the assistant (assistant.py).
+                "calls": True,
                 # Home widget "Last meeting · 3 action items" (the key: see widget_key).
                 "widget": {"path": f"/widget?k={widget_key()}", "size": "small", "title": "Last meeting"}}
     if APP_URL:
@@ -951,6 +956,7 @@ async def startup():
     bot.start_watchdog()
     calendars.start(bot.due_from_calendar)
     write_manifest()
+    assistant.start()
     p = ai_provider()
     log.info("Uno Notetaker %s on :%d — AI: %s via %s (%s)", APP_VERSION, PORT, p.name, p.route_label,
              p.source if p.ready else "NO KEY")

@@ -16,7 +16,16 @@ Telemost, Zoho). Whether the bot goes is decided per occurrence:
   * auto-join "off" → no; cancelled or declined by the person → no;
   * auto-join "accepted" → only meetings the person accepted or organizes
     (or with no guests at all);
-  * auto-join "all" → every call with a link.
+  * auto-join "all" → every call with a link;
+  * "mine" (what an assistant uses, see assistant.py) → the person is the
+    organizer or an attendee who hasn't declined, and somebody else is
+    invited (a solo block with an auto-added Meet link is not a call).
+
+A calendar can also come from Uno Work: when an assistant has "Join my
+calls" on, the person's Google Calendar (connected once in Uno) arrives as
+JSON through the App API — a virtual calendar "uno", nothing to paste. Google
+gives each occurrence a stable id, so a meeting moved to another time keeps
+its key: the bot follows it instead of going twice.
 """
 from __future__ import annotations
 
@@ -38,6 +47,8 @@ from .config import STATE_DIR, USER_AGENT, load_settings, save_settings
 log = logging.getLogger("notetaker.calendar")
 
 REFRESH_S = 5 * 60
+REFRESH_UNO_S = 3 * 60
+UNO_CAL = "uno"
 HORIZON = timedelta(days=7)
 MAX_ICS = 15 * 1024 * 1024
 MAX_CALENDARS = 10
@@ -117,15 +128,25 @@ def _mask(url: str) -> str:
     return f"{m.group(1) if m else 'calendar'} · …{url[-6:]}"
 
 
-def calendars() -> list[dict]:
+def _ical_calendars() -> list[dict]:
     return [c for c in load_settings().calendars if isinstance(c, dict) and c.get("url")]
+
+
+def calendars() -> list[dict]:
+    out = _ical_calendars()
+    from . import assistant  # late: assistant imports nothing of ours at import time
+    if assistant.active():
+        out.append({"id": UNO_CAL, "kind": "uno", "url": "", "name": "Google Calendar (through Uno)"})
+    return out
 
 
 def public_list() -> list[dict]:
     out = []
     for c in calendars():
         info = _cache.get(c["id"]) or {}
-        out.append({"id": c["id"], "name": c.get("name") or info.get("name") or "", "where": _mask(c["url"]),
+        out.append({"id": c["id"], "name": c.get("name") or info.get("name") or "",
+                    "where": "Uno Work · Google" if c.get("kind") == "uno" else _mask(c["url"]),
+                    "kind": c.get("kind", "ical"),
                     "fetched_at": info.get("at"), "error": info.get("error", ""),
                     "events": len(info.get("events") or [])})
     return out
@@ -137,7 +158,7 @@ def add(url: str) -> dict:
         url = "https://" + url[len("webcal://"):]
     if not re.match(r"^https?://[^\s]+$", url):
         raise ValueError("Paste the calendar's iCal address — it starts with https:// or webcal://")
-    cals = calendars()
+    cals = _ical_calendars()
     if any(c["url"] == url for c in cals):
         raise ValueError("This calendar is already connected")
     if len(cals) >= MAX_CALENDARS:
@@ -153,7 +174,7 @@ def add(url: str) -> dict:
 
 
 def remove(cid: str) -> bool:
-    cals = calendars()
+    cals = _ical_calendars()
     left = [c for c in cals if c["id"] != cid]
     if len(left) == len(cals):
         return False
@@ -166,6 +187,8 @@ def remove(cid: str) -> bool:
 # ---- fetching and parsing -----------------------------------------------------
 
 def _fetch(cal: dict) -> tuple[list[dict], str]:
+    if cal.get("kind") == "uno":
+        return _fetch_uno()
     try:
         with HTTP.stream("GET", cal["url"]) as resp:
             if resp.status_code in (401, 403, 404):
@@ -255,14 +278,109 @@ def parse(data: bytes, now: datetime | None = None) -> tuple[list[dict], str]:
     return out, name
 
 
+# ---- the person's Google Calendar through Uno Work ---------------------------------
+
+RESPONSES = {"accepted": "ACCEPTED", "declined": "DECLINED", "tentative": "TENTATIVE",
+             "needsaction": "NEEDS-ACTION", "organizer": "ACCEPTED"}
+
+
+def _utc(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        d = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+
+
+def from_feed(feed: dict) -> list[dict]:
+    """Uno's calendar_feed (Google, JSON) → the same occurrences parse() makes.
+    The key is Google's occurrence id: stable when the meeting moves."""
+    out = []
+    for ev in feed.get("events") or []:
+        gid = str(ev.get("id") or "")
+        if not gid:
+            continue
+        key = hashlib.sha1(f"g|{gid}".encode()).hexdigest()[:12]
+        start, end = _utc(ev.get("start") or ""), _utc(ev.get("end") or "")
+        status = str(ev.get("status") or "").upper()
+        if status != "CANCELLED" and not start:
+            continue
+        if start and not end:
+            end = start + timedelta(hours=1)
+        platform, link = find_link(str(ev.get("conference_url") or ""), str(ev.get("location") or ""),
+                                   str(ev.get("description") or ""))
+        people = []
+        for a in ev.get("attendees") or []:
+            people.append({"name": str(a.get("name") or ""), "email": _email(a.get("email")),
+                           "status": RESPONSES.get(str(a.get("response") or "").lower(), ""),
+                           "self": bool(a.get("self")), "resource": bool(a.get("resource"))})
+        org = ev.get("organizer") or {}
+        out.append({
+            "key": key, "uid": str(ev.get("ical_uid") or gid), "gid": gid,
+            "title": str(ev.get("title") or "")[:200],
+            "start": start.isoformat() if start else "", "end": end.isoformat() if end else "",
+            "status": status, "platform": platform, "url": link,
+            "organizer": _email(org.get("email")), "organizer_name": str(org.get("name") or ""),
+            "organizer_self": bool(org.get("self")) or ev.get("self_response") == "organizer",
+            "attendees": people[:100],
+        })
+    out.sort(key=lambda e: e["start"] or "9999")
+    return out
+
+
+def _fetch_uno() -> tuple[list[dict], str]:
+    from . import uno_app
+    from .config import app_api_config
+    cfg = app_api_config()
+    if not cfg:
+        raise ValueError("No Uno Work on this computer")
+    now = datetime.now(timezone.utc)
+    client = uno_app.Client(url=cfg["url"], token=cfg["token"], timeout=45.0)
+    try:
+        feed = client.calendar_events((now - timedelta(hours=12)).isoformat(), (now + HORIZON).isoformat())
+    except uno_app.UnoAppError as exc:
+        if exc.code in ("google_not_connected", "google_reconnect"):
+            raise ValueError("Google Calendar needs signing in again in Uno Work") from None
+        raise ValueError(f"Uno Work: {exc.message}") from None
+    account = str(feed.get("account") or "")
+    events = from_feed(feed)
+    with _lock:
+        info = _cache.get(UNO_CAL) or {}
+        info["account"] = account
+        _cache[UNO_CAL] = info
+    return events, account or "Google Calendar"
+
+
+# ---- the same call once ----------------------------------------------------------------
+
+def canonical(url: str) -> str:
+    """One string per call, whatever form the link came in (Meet with
+    ?authuser=, Zoom's /j/ vs /wc/join/ and its subdomains)."""
+    u = (url or "").strip()
+    m = re.search(r"meet\.google\.com/([a-z]{3}-[a-z]{4}-[a-z]{3})", u, re.I)
+    if m:
+        return "meet:" + m.group(1).lower()
+    m = re.search(r"zoom(?:gov)?\.(?:us|com)/(?:j|w|s|wc/join|wc)/(\d{9,12})", u, re.I)
+    if m:
+        return "zoom:" + m.group(1)
+    m = re.search(r"telemost\.(?:360\.)?yandex\.[a-z.]+/j/(\d+)", u, re.I)
+    if m:
+        return "telemost:" + m.group(1)
+    return re.split(r"[?#]", u)[0].rstrip("/").lower()
+
+
 def refresh(force: bool = False) -> None:
     for cal in calendars():
         info = _cache.get(cal["id"]) or {}
-        if not force and time.time() - (info.get("tried") or 0) < REFRESH_S:
+        every = REFRESH_UNO_S if cal.get("kind") == "uno" else REFRESH_S
+        if not force and time.time() - (info.get("tried") or 0) < every:
             continue
         try:
             events, name = _fetch(cal)
-            info = {"at": int(time.time()), "tried": time.time(), "events": events, "error": "", "name": name}
+            info = {"at": int(time.time()), "tried": time.time(), "events": events, "error": "", "name": name,
+                    "account": (_cache.get(cal["id"]) or {}).get("account", "")}
         except ValueError as exc:
             log.warning("calendar %s: %s", cal["id"], exc)
             info = {**info, "tried": time.time(), "error": str(exc)}
@@ -280,6 +398,11 @@ def my_emails() -> set[str]:
     for info in _cache.values():
         if "@" in (info.get("name") or ""):
             out.add(info["name"].strip().lower())
+        if "@" in (info.get("account") or ""):
+            out.add(info["account"].strip().lower())
+    from . import assistant
+    if assistant.owner_email():
+        out.add(assistant.owner_email())
     return out
 
 
@@ -288,26 +411,70 @@ def decide(ev: dict, overrides: dict | None = None, mine: set[str] | None = None
     overrides = _load_overrides() if overrides is None else overrides
     mine = my_emails() if mine is None else mine
     choice = (overrides.get("events") or {}).get(ev["key"])
-    if not ev.get("url"):
-        return False, "no call link"
     if ev.get("status") == "CANCELLED":
         return False, "cancelled"
+    if not ev.get("url"):
+        return False, "no call link"
     if choice == "skip":
         return False, "you turned it off"
     if choice == "join":
         return True, "you turned it on"
-    mode = load_settings().bot_auto_join
+    mode = auto_join_mode()
     if mode == "off":
         return False, "auto-join is off"
-    me = [a for a in ev.get("attendees") or [] if a["email"] in mine]
+    me = [a for a in ev.get("attendees") or [] if a.get("self") or a["email"] in mine]
     if any(a["status"] == "DECLINED" for a in me):
         return False, "you declined"
+    if mode == "mine":
+        organizer = bool(ev.get("organizer_self")) or ev.get("organizer") in mine
+        if not (organizer or me):
+            return False, "you're not in this meeting"
+        others = [a for a in ev.get("attendees") or []
+                  if not (a.get("self") or a["email"] in mine or a.get("resource"))]
+        if not others:
+            return False, "nobody else is invited"
+        return True, "auto"
     if mode == "accepted":
         organizer = ev.get("organizer") in mine
         accepted = any(a["status"] == "ACCEPTED" for a in me)
         if not (organizer or accepted or not ev.get("attendees")):
             return False, "you haven't accepted"
     return True, "auto"
+
+
+def auto_join_mode() -> str:
+    """While an assistant sends the bot, its rule wins over the app's setting."""
+    from . import assistant
+    return assistant.rule() if assistant.active() else load_settings().bot_auto_join
+
+
+def apply_work_choices(choices: dict) -> int:
+    """Per-meeting switches pressed in Uno Work ("don't go to this one"): a
+    choice newer than the last one applied wins. → how many applied."""
+    if not choices:
+        return 0
+    n = 0
+    with _lock:
+        d = _load_overrides()
+        applied = d.setdefault("work_applied", {})
+        for key, v in choices.items():
+            at = int(v.get("at") or 0)
+            if at <= int(applied.get(key) or 0):
+                continue
+            applied[key] = at
+            events = d.setdefault("events", {})
+            if v.get("choice") in ("join", "skip"):
+                events[key] = v["choice"]
+            else:
+                events.pop(key, None)
+            n += 1
+        if n:
+            if len(applied) > 500:
+                d["work_applied"] = dict(sorted(applied.items(), key=lambda kv: kv[1])[-300:])
+            _save_overrides(d)
+    if n:
+        _wake.set()
+    return n
 
 
 def set_choice(key: str, choice: str | None) -> None:
@@ -335,7 +502,7 @@ def upcoming(include_past_hours: float = 2) -> list[dict]:
     for cal in calendars():
         info = _cache.get(cal["id"]) or {}
         for ev in info.get("events") or []:
-            if datetime.fromisoformat(ev["end"]) < now - timedelta(hours=include_past_hours):
+            if ev.get("end") and datetime.fromisoformat(ev["end"]) < now - timedelta(hours=include_past_hours):
                 continue
             if ev["key"] in seen:
                 continue
@@ -344,6 +511,16 @@ def upcoming(include_past_hours: float = 2) -> list[dict]:
             seen[ev["key"]] = {**ev, "calendar": cal["id"], "join": join, "why": why, "choice": choice,
                                "platform_name": PLATFORM_NAMES.get(ev["platform"], "")}
     return sorted(seen.values(), key=lambda e: e["start"])
+
+
+def loaded() -> bool:
+    """Every calendar was read at least once without an error (so a meeting
+    missing from it is really gone, not just not fetched yet)."""
+    for cal in calendars():
+        info = _cache.get(cal["id"]) or {}
+        if not info.get("at") or info.get("error"):
+            return False
+    return True
 
 
 def find_event(key: str) -> dict | None:
@@ -358,8 +535,11 @@ def start(on_due) -> None:
     def loop():
         while True:
             try:
+                from . import bot  # late: bot imports this module
                 if calendars():
                     refresh()
+                bot.reconcile()
+                if calendars():
                     s = load_settings()
                     now = datetime.now(timezone.utc)
                     early = timedelta(minutes=max(0, min(15, s.bot_join_early_min)))
