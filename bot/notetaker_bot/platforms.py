@@ -31,6 +31,9 @@ class Spec:
     in_call: list[str] = field(default_factory=list)     # buttons only shown in the call (Leave)
     after_join: list[str] = field(default_factory=list)  # click once in: "Join audio by computer", popups
     denied: list[str] = field(default_factory=list)      # text: not let in / can't join
+    # text: refused only because nobody is in the call yet (Meet turns guests away until
+    # someone starts it) — the bot tries again until the lobby wait runs out
+    not_started: list[str] = field(default_factory=list)
     ended: list[str] = field(default_factory=list)       # text: the call is over for us
     alone: list[str] = field(default_factory=list)       # text: nobody else is here
     chat_open: list[str] = field(default_factory=list)
@@ -73,6 +76,7 @@ MEET = Meet(
            r"Someone will let you in"],
     in_call=[r"^Leave call$"],
     after_join=[r"^Got it$", r"^Dismiss$", r"^Close$"],
+    not_started=[r"You can't join this (video )?call"],
     denied=[r"You can't join this (video )?call", r"denied your request", r"No one responded to your request",
             r"request to join .*(was )?declined", r"Check your meeting code", r"meeting code (is invalid|has expired)",
             r"Sign in to join"],

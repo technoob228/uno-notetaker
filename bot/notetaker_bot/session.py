@@ -33,13 +33,15 @@ QUIET_AFTER_END_S = 3 * 60
 ALONE_S = 90
 UPLOAD_EVERY_S = 5
 REPORT_EVERY_S = 15
+NOT_STARTED_RETRY_S = 30  # Meet turned the bot away before anyone came: knock again
 
 
 class Refused(Exception):
-    def __init__(self, outcome: str, detail: str):
+    def __init__(self, outcome: str, detail: str, retry: bool = False):
         super().__init__(detail)
         self.outcome = outcome
         self.detail = detail
+        self.retry = retry  # the call isn't started yet: worth another try
 
 
 def _outcome(why: str) -> str:
@@ -121,7 +123,7 @@ class Session:
             with Sink(self.id) as sink:
                 await self.report("joining", f"Opening {self.spec.name}…")
                 await self._open(sink.name)
-                await self._join()
+                await self._join_retrying()
                 await self._in_call(sink.name)
                 outcome, detail = "done", self.why_left
         except Refused as r:
@@ -160,6 +162,34 @@ class Session:
         log.info("[%s] opening %s", self.id, url)
         await self.page.goto(url, wait_until="domcontentloaded", timeout=60_000)
 
+    async def _join_retrying(self) -> None:
+        """The bot comes at the start; the host is often a minute late, and Meet turns
+        guests away while nobody is in the call. Knock again until the lobby wait ends."""
+        wait_s = int(self.job.get("lobby_wait_s") or 900)
+        give_up = time.time() + wait_s
+        tries = 0
+        while True:
+            try:
+                await self._join()
+                return
+            except Refused as r:
+                if not r.retry:
+                    raise
+                tries += 1
+                if time.time() + NOT_STARTED_RETRY_S > give_up:
+                    raise Refused("not_admitted",
+                                  f"Nobody started the call or let the bot in within {wait_s // 60} min "
+                                  f"({r.detail})") from None
+                log.info("[%s] not started yet (%s) — try %d again in %ds", self.id, r.detail, tries,
+                         NOT_STARTED_RETRY_S)
+                await self.report("lobby", "Waiting for someone to start the call…")
+            for _ in range(NOT_STARTED_RETRY_S):
+                if self.stop.is_set():
+                    raise Refused("failed", "Cancelled while waiting for the call to start")
+                await asyncio.sleep(1)
+            assert self.page
+            await self.page.goto(self.spec.url(self.job["url"]), wait_until="domcontentloaded", timeout=60_000)
+
     async def _join(self) -> None:
         pg, sp = self.page, self.spec
         assert pg
@@ -172,6 +202,8 @@ class Session:
                 t = (await P.text(pg)).strip().replace("\n", " · ")[:160]
                 raise Refused("failed", f"Could not find how to join on the page ({t or 'empty page'})")
             t = await P.text(pg)
+            if (why := P.says(t, sp.not_started)):
+                raise Refused("failed", f"{sp.name}: {why}", retry=True)
             if (why := P.says(t, sp.denied)):
                 raise Refused(_outcome(why), f"{sp.name}: {why}")
             if await P.inside(pg, sp) and not P.says(t, sp.lobby):
@@ -203,6 +235,8 @@ class Session:
             if self.stop.is_set():
                 raise Refused("failed", "Cancelled while waiting to be let in")
             t = await P.text(pg)
+            if (why := P.says(t, sp.not_started)):
+                raise Refused("failed", f"{sp.name}: {why}", retry=True)
             if (why := P.says(t, sp.denied)):
                 raise Refused(_outcome(why), f"{sp.name}: {why}")
             if await P.inside(pg, sp) and not P.says(t, sp.lobby):
