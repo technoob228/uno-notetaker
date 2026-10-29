@@ -40,6 +40,15 @@ def enqueue(mid: str, kind: str = "full") -> None:
     _jobs.put((mid, kind))
 
 
+def run_job(mid: str, kind: str) -> None:
+    if kind == "full" and (store.get(mid) or {}).get("source") != "screen":
+        transcribe(mid)
+        summarize(mid)
+    elif kind in ("full", "notes"):
+        # "full" for a screen recording too: it comes with its transcript (Uno Work watched it).
+        summarize(mid)
+
+
 def start_worker() -> None:
     def loop():
         while True:
@@ -47,11 +56,7 @@ def start_worker() -> None:
             with _qlock:
                 _queued.discard((mid, kind))
             try:
-                if kind == "full":
-                    transcribe(mid)
-                    summarize(mid)
-                elif kind == "notes":
-                    summarize(mid)
+                run_job(mid, kind)
             except Exception as exc:  # noqa: BLE001 — every failure must reach the UI
                 log.exception("job %s %s failed", kind, mid)
                 msg = str(exc) if isinstance(exc, (ai.AIError, RuntimeError)) else f"Unexpected error: {exc}"
@@ -65,6 +70,40 @@ def start_worker() -> None:
             enqueue(m["id"], "full")
         elif m["status"] == "summarizing":
             enqueue(m["id"], "notes")
+        if m.get("source") == "screen":
+            _screen_seen.add(m["id"])
+    threading.Thread(target=_watch_screen_recordings, daemon=True, name="notetaker-screen").start()
+
+
+# Screen recordings from Uno Work (Loom Work) arrive as ready folders in
+# ~/Meetings — meeting.json (source "screen", status "summarizing") written
+# last, with transcript.json beside it. The app was not asked: it notices.
+_screen_seen: set[str] = set()
+SCREEN_SCAN_S = 10
+
+
+def pick_up_screen_recordings() -> list[str]:
+    """New screen recordings waiting for notes → the notes queue (once each)."""
+    picked = []
+    for m in store.list_all():
+        mid = m["id"]
+        if m.get("source") != "screen" or mid in _screen_seen:
+            continue
+        _screen_seen.add(mid)
+        if m["status"] in ("queued", "summarizing"):
+            store.update(mid, status="summarizing", progress="Writing notes…", error="")
+            enqueue(mid, "notes")
+            picked.append(mid)
+    return picked
+
+
+def _watch_screen_recordings() -> None:
+    while True:
+        time.sleep(SCREEN_SCAN_S)
+        try:
+            pick_up_screen_recordings()
+        except Exception:  # noqa: BLE001 — the scan must keep running
+            log.exception("screen recordings scan failed")
 
 
 def _norm(text: str) -> str:
@@ -203,20 +242,42 @@ def name_voices(segments: list[dict], s, attendees: list[str] | None = None) -> 
     return segments
 
 
+def _screen_md(s: dict) -> str:
+    """What was on screen / what was done at this line (screen recordings)."""
+    parts = []
+    if (s.get("screen") or "").strip():
+        parts.append(f"_On screen: {s['screen'].strip()}_")
+    if (s.get("did") or "").strip():
+        parts.append(f"_Did: {s['did'].strip()}_")
+    return "  \n".join(parts)
+
+
 def transcript_md(meta: dict, segments: list[dict]) -> str:
-    title = meta.get("title") or "Meeting"
+    title = meta.get("title") or ("Screen recording" if meta.get("source") == "screen" else "Meeting")
     lines = [f"# Transcript — {title}", "",
              f"_{meta['created_at'].replace('T', ' ')[:16]} · {audio.fmt_ts(meta.get('duration', 0))}_", ""]
     for s in segments:
         who = f" {s['speaker']}:" if s.get("speaker") else ""
-        lines.append(f"**[{audio.fmt_ts(s['start'])}]**{who} {s['text']}")
+        text = (s.get("text") or "").strip()
+        lines.append(f"**[{audio.fmt_ts(s['start'])}]**{who} {text}".rstrip())
+        screen = _screen_md(s)
+        if screen:
+            lines.append(screen)
         lines.append("")
     return "\n".join(lines)
 
 
 def transcript_for_ai(segments: list[dict]) -> str:
-    return "\n".join(f"[{audio.fmt_ts(s['start'])}]" + (f" {s['speaker']}:" if s.get("speaker") else "")
-                     + f" {s['text']}" for s in segments)
+    out = []
+    for s in segments:
+        line = f"[{audio.fmt_ts(s['start'])}]" + (f" {s['speaker']}:" if s.get("speaker") else "")
+        line += f" {(s.get('text') or '').strip() or '(silence)'}"
+        if (s.get("screen") or "").strip():
+            line += f" [screen: {s['screen'].strip()}]"
+        if (s.get("did") or "").strip():
+            line += f" [did: {s['did'].strip()}]"
+        out.append(line)
+    return "\n".join(out)
 
 
 def _track(mid: str, wav: str, total: float, speaker: str, tmp: str, done_counter: list,

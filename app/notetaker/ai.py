@@ -261,7 +261,21 @@ TEMPLATES = {
                   "'Notable answers' (quote briefly), 'Recommendation' (hire / no hire / next round, with why — "
                   "state it is the AI's reading, the decision is the interviewer's)."),
     },
+    # A screen recording from Uno Work (Loom Work): one person shows their
+    # screen and talks; Work adds what was on screen to each line.
+    "screen": {
+        "name": "Screen recording",
+        "extra": ("This is a screen recording: one person shows their screen and explains. Lines may end with "
+                  "[screen: …] (what was on screen) and [did: …] (what they did, e.g. a click) — use them to make "
+                  "each point concrete: name the page, button or field it is about. Action items are what the "
+                  "person wants done or fixed; owner: the person if they say they will do it, otherwise \"—\". "
+                  "Skip 'Decisions' if there is no discussion. Add a section 'What was shown' with 2–5 bullets "
+                  "in the order it was shown, each with its [mm:ss]."),
+    },
 }
+
+# Kinds a person picks for a new meeting (the screen kind comes from Uno Work).
+PICKABLE_TEMPLATES = [k for k in TEMPLATES if k != "screen"]
 
 LANG_NAMES = {"ru": "Russian", "en": "English"}
 

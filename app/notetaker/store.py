@@ -124,7 +124,7 @@ def rename_folder(mid: str, title: str) -> None:
     with _lock:
         path = folder(mid)
         base = os.path.basename(path)
-        if not re.match(r"^\d{4}-\d{2}-\d{2} \d{2}-\d{2} Meeting( \(\d+\))?$", base):
+        if not re.match(r"^\d{4}-\d{2}-\d{2} \d{2}-\d{2} (Meeting|Screen recording)( \(\d+\))?$", base):
             return
         stem = base[:16]
         new, n = os.path.join(MEETINGS_DIR, f"{stem} {_safe_title(title)}"), 2

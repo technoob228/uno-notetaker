@@ -101,7 +101,8 @@ async function loadState() {
   el.title = p.ready ? `AI: ${p.route_label} — ${p.source}` : "";
   el.className = `ai-status ${p.ready ? "ok" : "bad"}`;
   for (const id of ["#rec-template", "#up-template", "#set-template"]) {
-    $(id).innerHTML = Object.entries(STATE.templates).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+    const pickable = STATE.pickable_templates || Object.keys(STATE.templates);
+    $(id).innerHTML = Object.entries(STATE.templates).filter(([k]) => pickable.includes(k)).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
     $(id).value = STATE.settings.template;
   }
   liveCalls();
@@ -142,7 +143,7 @@ async function loadList() {
     return `${head}<a href="#/m/${m.id}" class="item ${m.id === current ? "active" : ""}" data-id="${m.id}">
       <span class="t">${esc(m.title || (m.status === "done" ? "Untitled meeting" : "New meeting"))}</span>
       <span class="s">${new Date(m.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}${m.duration ? " · " + fmtTs(m.duration) : ""}
-        ${m.open_actions ? `<span class="pill">${plural(m.open_actions, "to-do")}</span>` : ""}${statusBadge(m.status)}</span>
+        ${m.source === "screen" ? `<span class="pill screen-pill" title="Screen recording from Uno Work">Screen</span>` : ""}${m.open_actions ? `<span class="pill">${plural(m.open_actions, "to-do")}</span>` : ""}${statusBadge(m.status)}</span>
     </a>`;
   }).join("");
   return meetings;
@@ -636,6 +637,7 @@ async function renderMeeting(first = false) {
     return;
   }
   const src = { browser: "recorded in the browser", upload: "uploaded", telegram: "from Telegram",
+    screen: "screen recording from Uno Work",
     bot: `the bot in ${PLATFORM[(m.call || {}).platform] || "the call"}` }[m.source] || m.source;
   const botLive = m.source === "bot" && m.status === "recording";
   const open = (m.actions || []).filter((a) => !a.done).length;
@@ -652,7 +654,7 @@ async function renderMeeting(first = false) {
       ${m.status === "uploading" && !live ? `<section class="progress"><p id="up-pct">Uploading…</p><div class="bar"><i id="up-progress"></i></div></section>` : ""}
       ${busy && m.status !== "uploading" ? `<section class="progress"><div class="spinner"></div><div><p id="progress-text">${esc(m.progress || "Working…")}</p>${progressSteps(m)}</div></section>` : ""}
       ${m.status === "error" ? `<section class="error-box"><b>Something went wrong.</b> <span>${esc(m.error)}</span> <button class="btn" id="btn-retry">Retry</button></section>` : ""}
-      ${m.has_audio ? `<audio controls preload="metadata" id="player" src="/api/meetings/${id}/audio"></audio>` : ""}
+      ${m.source === "screen" ? screenPlayer(m) : m.has_audio ? `<audio controls preload="metadata" id="player" src="/api/meetings/${id}/audio"></audio>` : ""}
       ${m.segments.length ? `
       <nav class="tabs">
         <button data-tab="notes" class="${tab === "notes" ? "on" : ""}">Notes</button>
@@ -753,6 +755,22 @@ function focusLine(sec, scroll = true) {
   if (best && scroll) best.scrollIntoView({ block: "center", behavior: "smooth" });
   if (seekOnOpen === null && scroll) seek(sec, false);
 }
+// A screen recording's video stays in Uno Drive; the meeting keeps its share
+// link (7 days) — the WebM for browsers that play it, the MP4 copy for Safari.
+function screenPlayer(m) {
+  const sc = m.screen || {};
+  const where = sc.drive_key ? `Uno Drive → ${esc(sc.drive_key)}` : "Uno Drive → Recordings";
+  const expired = !sc.share_url || (sc.share_expires_at && new Date(sc.share_expires_at) < new Date());
+  if (expired) return `<p class="screen-gone muted">The video is in ${where}${sc.share_url ? " (its link expired)" : ""}.</p>`;
+  const u = sc.share_url;
+  const join = u.includes("?") ? "&" : "?";
+  return `<video controls preload="metadata" playsinline id="player" class="screen-video">
+      <source src="${esc(u + join + "media=1")}" type="video/webm">
+      <source src="${esc(u + join + "format=mp4")}" type="video/mp4">
+    </video>
+    <p class="fine screen-src">In ${where} · <a href="${esc(u)}" target="_blank" rel="noopener">Open the link</a></p>`;
+}
+
 function bindPlayerFollow() {
   const p = $("#player");
   if (!p) return;
@@ -809,13 +827,13 @@ function renderTab(m) {
         <span class="fine">${guessed ? "Told apart by the AI from what was said — " : ""}tap a name to fix it</span></div>` : ""}
       <div class="transcript">${m.segments.map((s) => {
         const same = s.speaker === prev; prev = s.speaker;
-        return `<p class="line ${same ? "cont" : ""}" data-start="${s.start}"><a href="#" class="ts" data-ts="${fmtTs(s.start)}">${fmtTs(s.start)}</a><span class="said">${s.speaker && !same ? `<b class="spk" style="color:${spkColor(s.speaker)}">${esc(s.speaker === "Me" ? "You" : s.speaker)}</b>` : ""}${esc(s.text)}</span></p>`;
+        return `<p class="line ${same ? "cont" : ""}" data-start="${s.start}"><a href="#" class="ts" data-ts="${fmtTs(s.start)}">${fmtTs(s.start)}</a><span class="said">${s.speaker && !same ? `<b class="spk" style="color:${spkColor(s.speaker)}">${esc(s.speaker === "Me" ? "You" : s.speaker)}</b>` : ""}${esc(s.text)}${s.screen ? `<span class="on-screen">On screen: ${esc(s.screen)}</span>` : ""}${s.did ? `<span class="on-screen did">Did: ${esc(s.did)}</span>` : ""}</span></p>`;
       }).join("")}</div>`;
     $$(".spk-chip", body).forEach((b) => b.onclick = () => renameSpeaker(m, b.dataset.spk));
   } else {
     const chat = m.chat || [];
     body.innerHTML = `
-      <div class="chat" id="chat">${chat.length ? chat.map(chatMsg).join("") : `<div class="suggest">${["What did we promise the client?", "Who owns what, by when?", "Write a follow-up email"].map((q) => `<button class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>`}</div>
+      <div class="chat" id="chat">${chat.length ? chat.map(chatMsg).join("") : `<div class="suggest">${(m.source === "screen" ? ["What exactly should be fixed?", "Write it up as a bug report", "List the steps shown"] : ["What did we promise the client?", "Who owns what, by when?", "Write a follow-up email"]).map((q) => `<button class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>`}</div>
       <form class="ask" id="ask-form"><input id="ask-q" placeholder="Ask about this meeting…" autocomplete="off" enterkeyhint="send"><button class="btn primary">Ask</button></form>`;
     const ask = async (q) => {
       const c = $("#chat");

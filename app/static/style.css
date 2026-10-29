@@ -99,6 +99,12 @@ h3.group .muted { font-weight: 400; font-size: 13px; }
 .m-meta { color: var(--muted); font-size: 13.5px; margin: 4px 0 18px; }
 .m-meta b { color: var(--accent); font-weight: 550; }
 audio { width: 100%; margin: 0 0 12px; }
+.screen-video { width: 100%; max-height: 60vh; background: #000; border-radius: 10px; margin: 0 0 4px; display: block; }
+.screen-src { margin: 0 0 12px; }
+.screen-gone { margin: 0 0 12px; }
+.screen-pill { background: #eef2ff; color: #4338ca; margin-right: 4px; }
+.on-screen { display: block; color: var(--muted, #6b7280); font-size: 12.5px; margin-top: 2px; }
+.on-screen.did { font-style: italic; }
 
 .rec { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px; text-align: center; display: grid; gap: 14px; justify-items: center; margin-bottom: 18px; }
 .rec-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--rec); animation: pulse 1.4s infinite; }

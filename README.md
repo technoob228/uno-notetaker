@@ -12,6 +12,10 @@ Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
   the tab's audio and your microphone are recorded as two tracks, so the
   transcript knows what *you* said. Or record a meeting in the room (mic only).
 - **Upload** an audio or video file.
+- **Screen recordings from Uno Work** (0.6.0): a recording made with «Show the
+  agent» in Uno Work lands here too, next to the calls — the video (from Uno
+  Drive), what was said *and what was on screen* line by line, notes and action
+  items with **Ask Uno to do it**. See `docs/screen-recordings.md`.
 - **Transcript** with timestamps, one line per utterance (audio is cut at
   pauses). **Speakers** are told apart by voice: a speaker-embedding model
   (NeMo TitaNet-small via sherpa-onnx, 40 MB, CPU) groups the lines, then the

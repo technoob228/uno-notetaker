@@ -280,6 +280,7 @@ def _state() -> dict:
         "provider": {"name": p.name, "ready": p.ready, "source": p.source, "base_url": p.base_url,
                      "route": p.route, "route_label": p.route_label, "model": notes_model(s, p)},
         "templates": {k: v["name"] for k, v in ai.TEMPLATES.items()},
+        "pickable_templates": ai.PICKABLE_TEMPLATES,
         "models": MODEL_CHOICES, "password_protected": bool(ADMIN_PASSWORD),
         # What this computer offers: the Uno Work App API (Inbox, tasks for the AI) and Telegram.
         "uno_work": p.route == ROUTE_APP, "inbox": deliver.inbox_available(),
