@@ -199,6 +199,8 @@ class TestManifestAndState(RouteBase):
             manifest = json.load(fh)
         self.assertEqual(manifest["ai"], {"chat": True, "tasks": True, "limitUsd": 10})
         self.assertTrue(manifest["notify"])
+        # 0.7: the calendars of the Uno account without an assistant; "calls" stays for Join my calls
+        self.assertEqual((manifest["calendar"], manifest["calls"]), (True, True))
         self.assertRegex(manifest["widget"]["path"], r"^/widget\?k=[0-9a-f]{32}$")
         self.key_dir()
         saved_state = config.STATE_DIR

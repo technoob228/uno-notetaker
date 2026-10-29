@@ -186,7 +186,7 @@ function showHome() {
       ${p.ready ? "" : `<div class="warn">The AI is not set up yet. <button class="link" id="home-settings">Open Settings</button></div>`}
       <div class="tips">
         <div><b>From your phone</b><span>${STATE.telegram.paired ? `Send a voice message or a recording to <b>@${esc(STATE.telegram.bot)}</b> in Telegram.` : `Connect a Telegram bot in <button class="link inline" id="tip-tg">Settings</button> and send recordings to it.`} Or open this page on the phone and add it to the Home Screen.</span></div>
-        <div><b>A bot that joins your calls</b><span>${STATE.calendars ? `The bot joins the calls in your calendar by itself. For any other call, paste its link in <a href="#/calls">Calls</a>.` : `Connect your calendar (an iCal link) or paste a call link in <a href="#/calls">Calls</a>, and the bot joins by itself: Meet, Zoom, Teams, Telemost, Zoho.`} The host may have to let it in from the lobby; Zoom goes through its web client.</span></div>
+        <div><b>A bot that joins your calls</b><span>${STATE.calendars ? `The bot joins the calls in your calendar by itself. For any other call, paste its link in <a href="#/calls">Calls</a>.` : `Connect your calendar in <a href="#/calls">Calls</a> — Google or Outlook from your Uno account, or any calendar by its iCal link — and the bot joins by itself: Meet, Zoom, Teams, Telemost, Zoho. Or paste a call link there.`} The host may have to let it in from the lobby; Zoom goes through its web client.</span></div>
       </div>
       <p class="fine">Recording other people? Tell them first — in many places it's required by law.</p>
     </section>`;
@@ -263,6 +263,146 @@ let callsTimer = null;
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const platformTag = (p) => `<span class="pf pf-${esc(p || "other")}">${esc(PLATFORM[p] || "Call")}</span>`;
 
+// ---- calendars: from the Uno account, and iCal links ---------------------------------
+
+// Short, plain steps per service (checked 29.10.2026). The link is secret and read-only.
+const ICAL_HOWTO = [
+  ["Google Calendar", `Only if Google isn't connected above.`, [
+    "On a computer, open Google Calendar → ⚙ → <b>Settings</b>.",
+    "On the left, under <b>Settings for my calendars</b>, click your calendar.",
+    "In <b>Integrate calendar</b>, copy <b>Secret address in iCal format</b>."]],
+  ["Outlook.com / Microsoft 365", `Easier: connect Outlook &amp; Teams above. Some work accounts don't allow publishing.`, [
+    "Outlook on the web → ⚙ <b>Settings</b> → <b>Calendar</b> → <b>Shared calendars</b>.",
+    "Under <b>Publish a calendar</b>, pick your calendar and <b>Can view all details</b> → <b>Publish</b>.",
+    "Copy the <b>ICS</b> link."]],
+  ["Yandex Calendar", "", [
+    "In Yandex Calendar, point at your calendar in the list on the left and click ⚙.",
+    "Open <b>Export</b> (Экспорт), choose iCal and copy the link."]],
+  ["Apple iCloud", "Anyone with this link can see the calendar.", [
+    "On iCloud.com → Calendar, click the share icon next to your calendar (on iPhone: Calendars → ⓘ).",
+    "Turn on <b>Public Calendar</b> and copy the link.",
+    "Paste it as is — a <code>webcal://</code> link works too."]],
+  ["Zoho Calendar", "", [
+    "In Zoho Calendar, under <b>My Calendars</b>, click ⋮ next to your calendar → <b>Share</b>.",
+    "Turn on <b>Enable private address for this calendar</b>.",
+    "Copy the <b>ICAL</b> link."]],
+];
+const howtoHtml = () => ICAL_HOWTO.map(([name, note, steps]) => `<details class="howto"><summary>${name}</summary>
+  <ol>${steps.map((x) => `<li>${x}</li>`).join("")}</ol>${note ? `<p class="fine">${note}</p>` : ""}</details>`).join("");
+$("#cal-howto").innerHTML = howtoHtml();
+
+const UNO_CONNECTOR = { gmail: "Gmail & Calendar", microsoft: "Outlook & Teams calendar" };
+const framed = () => { try { return window.parent !== window; } catch { return true; } };
+let unoWatch = null;   // after "Connect": re-check every few seconds for ~2 minutes
+let unoHint = {};      // provider → the "open Uno Work" hint when not in Uno Work's frame
+
+function unoRows(u) {
+  const off = !u.enabled && !u.assistant;
+  return u.calendars.map((c) => {
+    let state, btn = "";
+    if (off) state = `<span class="muted">Off</span>`;
+    else if (c.state === "connected") state = `<span class="ok">Connected</span>${c.account ? ` <span class="muted">· ${esc(c.account)}</span>` : ""}${c.fetched_at ? ` <span class="muted">· ${plural(c.events, "event")} this week</span>` : ""}`;
+    else if (c.state === "not_connected") { state = `<span class="muted">Not connected</span>`; btn = "Connect"; }
+    else if (c.state === "reconnect") { state = `<span class="bad">Sign in again</span>`; btn = "Sign in again"; }
+    else if (c.state === "unavailable") state = `<span class="muted">${c.error ? esc(c.error) : "Not available yet"}</span>`;
+    else state = `<span class="bad">${esc(c.error || "Couldn't read it")}</span>`;
+    const waiting = unoWatch && unoWatch.provider === c.provider;
+    return `<li class="ucal ${off ? "off" : ""}"><span class="ucal-name"><b>${esc(c.name)}</b><br><span class="small">${state}</span>
+        ${unoHint[c.provider] ? `<br><span class="fine">${unoHint[c.provider]}</span>` : ""}</span>
+      ${btn ? `<button type="button" class="btn small-btn" data-uno-connect="${c.provider}" ${waiting ? "disabled" : ""}>${waiting ? "Waiting…" : btn}</button>` : ""}</li>`;
+  }).join("");
+}
+
+// The "From your Uno account" block. withSwitch: the setting (inside the Settings form).
+function unoBlock(u, withSwitch) {
+  if (!u || !u.work) return "";
+  const head = `<p class="sub">From your Uno account</p>`;
+  if (u.supported === false) {
+    return `${head}<p class="fine">Google Calendar and Outlook &amp; Teams from your Uno account need a newer Uno Work. Until then, add your calendar by its iCal link below.</p>`;
+  }
+  const sw = withSwitch ? `<label class="check"><input type="checkbox" name="uno_calendars" ${STATE.settings.uno_calendars !== false ? "checked" : ""}> <span><b>Use calendars from my Uno account</b> <span class="muted">— the ones you connected in Uno Work. Nothing to paste.</span></span></label>` : "";
+  const asst = u.assistant ? `<p class="fine">Your assistant in Uno Work uses these calendars to join your calls — turn that off in Uno Work → the assistant → Join my calls.</p>` : "";
+  const off = !withSwitch && !u.enabled && !u.assistant ? `<p class="fine">Turned off in Settings → Calendars.</p>` : "";
+  return `${head}${sw}<ul class="cals ucals">${unoRows(u)}</ul>${asst}${off}`;
+}
+
+function icalList(cals) {
+  const own = cals.filter((c) => c.kind !== "uno");
+  return own.length ? `<ul class="cals">${own.map((c) => `<li><b>${esc(c.name || "Calendar")}</b> <span class="muted">${esc(c.where)} · ${c.error ? `<span class="bad">${esc(c.error)}</span>` : `${plural(c.events, "event")} this week`}</span>
+    <button type="button" class="link danger small" data-cal-del="${c.id}">Remove</button></li>`).join("")}</ul>` : "";
+}
+
+function connectUno(provider, rerender) {
+  if (framed()) {
+    window.parent.postMessage({ type: "uno-work:connect", provider }, "*");
+    delete unoHint[provider];
+  } else {
+    unoHint[provider] = `Open Uno Work → Settings → Connectors and connect <b>${esc(UNO_CONNECTOR[provider] || provider)}</b>. This page notices it by itself.`;
+  }
+  clearInterval(unoWatch && unoWatch.timer);
+  const until = Date.now() + 2 * 60 * 1000;
+  unoWatch = { provider, timer: setInterval(async () => {
+    const u = await api("/api/calendars/uno?fresh=1").catch(() => null);
+    const c = u && u.calendars.find((x) => x.provider === provider);
+    const done = c && c.state === "connected";
+    if (done || Date.now() > until) {
+      clearInterval(unoWatch.timer); unoWatch = null;
+      if (done) { delete unoHint[provider]; toast(`${c.name} connected`); loadState().catch(() => {}); }
+    }
+    if (u) rerender(u);
+  }, 4000) };
+  rerender(null);
+}
+
+function bindCalendarRows(root, rerender) {
+  $$("[data-uno-connect]", root).forEach((b) => b.onclick = () => connectUno(b.dataset.unoConnect, rerender));
+  $$("[data-cal-del]", root).forEach((b) => b.onclick = async () => {
+    if (!confirm("Remove this calendar? The bot stops joining its calls.")) return;
+    try { await api(`/api/calendars/${b.dataset.calDel}`, { method: "DELETE" }); } catch (e) { toast(e.message, "bad"); }
+    await loadState(); rerender(null);
+  });
+}
+
+// Settings → Calendars
+let calBoxData = null;
+async function renderCalendarBox(uno) {
+  const box = $("#cal-box");
+  if (!uno || !calBoxData) {
+    try { calBoxData = await api("/api/calendars"); } catch (e) { box.innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
+  }
+  if (uno) calBoxData.uno = uno;
+  const keep = box.querySelector('[name="uno_calendars"]');
+  const checked = keep ? keep.checked : null;
+  const typed = $("#cal-box-url") ? $("#cal-box-url").value : "";
+  const openHowto = $$("details.howto[open] summary", box).map((x) => x.textContent);
+  box.innerHTML = `${unoBlock(calBoxData.uno, true)}
+    <p class="sub">Other calendars (iCal link)</p>
+    <p class="fine">Yandex, iCloud, Zoho or any other calendar: paste its secret iCal address. Notetaker reads it every few minutes; it's read-only, and you can reset the address in your calendar any time.</p>
+    ${icalList(calBoxData.calendars)}
+    <div class="row-btns"><input id="cal-box-url" placeholder="https://… or webcal://…" autocomplete="off"><button type="button" class="btn" id="cal-box-add">Add</button></div>
+    <div class="howto-list">${howtoHtml()}</div>`;
+  if (checked !== null && box.querySelector('[name="uno_calendars"]')) box.querySelector('[name="uno_calendars"]').checked = checked;
+  $("#cal-box-url").value = typed;
+  $$("details.howto summary", box).forEach((x) => { if (openHowto.includes(x.textContent)) x.parentElement.open = true; });
+  const add = async () => {
+    const url = $("#cal-box-url").value.trim();
+    if (!url) return;
+    $("#cal-box-add").disabled = true;
+    toast("Reading the calendar…");
+    try {
+      const r = await api("/api/calendars", { method: "POST", body: JSON.stringify({ url }) });
+      toast(`Connected${r.name ? ` “${r.name}”` : ""} — ${plural(r.events, "event")} this week`);
+      $("#cal-box-url").value = "";
+      await loadState();
+      calBoxData = null;
+    } catch (e) { toast(e.message, "bad"); }
+    renderCalendarBox();
+  };
+  $("#cal-box-add").onclick = add;
+  $("#cal-box-url").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+  bindCalendarRows(box, (u) => { if ($("#dlg-settings").open) renderCalendarBox(u); });  // null: read it all again
+}
+
 async function showCalls() {
   current = null; view = "calls";
   clearInterval(pollTimer);
@@ -308,8 +448,8 @@ async function renderCalls() {
     </div>`;
   }).join("");
   const noLink = d.upcoming.filter((e) => !e.url && new Date(e.end) > new Date()).length;
-  const cals = d.calendars.map((c) => `<li><b>${esc(c.name || "Calendar")}</b> <span class="muted">${esc(c.where)} · ${c.error ? `<span class="bad">${esc(c.error)}</span>` : `${plural(c.events, "event")} this week`}</span>
-      ${c.kind === "uno" ? `<span class="muted small">· turn off in Uno Work</span>` : `<button class="link danger small" data-cal-del="${c.id}">Remove</button>`}</li>`).join("");
+  const uno = unoBlock(d.uno, false);
+  const ical = icalList(d.calendars);
   // An assistant in Uno Work sends this Notetaker to the person's calls ("Join my calls").
   const asst = STATE.assistant && STATE.assistant.active ? STATE.assistant : null;
   const recent = d.recent.map((x) => `<div class="ev past">
@@ -331,9 +471,10 @@ async function renderCalls() {
       ${active ? `<h3>Now</h3>${active}` : ""}
       <h3>Coming up ${d.calendars.length ? `<span class="muted small">· the bot ${esc(mode)} · <button class="link small" id="calls-settings">change</button></span>` : ""}</h3>
       ${d.calendars.length ? (upcoming || `<p class="muted">No calls with a link in the next 7 days.</p>`) + (noLink ? `<p class="fine">${plural(noLink, "event")} without a call link — the bot has nowhere to go.</p>` : "")
-        : `<div class="empty-cal"><p>Connect your calendar and the bot joins your calls by itself — Google Meet, Zoom, Teams, Yandex Telemost, Zoho Meeting. Or send it to a call by link.</p><button class="btn primary" id="btn-cal-first">Connect a calendar</button></div>`}
-      ${d.calendars.length ? `<h3>Calendars</h3><ul class="cals">${cals}</ul>
-        <div class="row-btns"><button class="btn" id="btn-cal-add">Add a calendar</button><button class="link" id="btn-cal-refresh">Check now</button></div>` : ""}
+        : `<div class="empty-cal cal-box"><p>Connect your calendar and the bot joins your calls by itself — Google Meet, Zoom, Teams, Yandex Telemost, Zoho Meeting. Or send it to a call by link.</p>
+          ${uno}${uno ? `<p class="sub">Other calendars (iCal link)</p>` : ""}<button class="btn ${uno ? "" : "primary"}" id="btn-cal-first">Add a calendar by its iCal link</button></div>`}
+      ${d.calendars.length ? `<h3>Calendars</h3><div class="cal-box">${uno}${uno && ical ? `<p class="sub">Other calendars (iCal link)</p>` : ""}${ical}</div>
+        <div class="row-btns"><button class="btn" id="btn-cal-add">Add an iCal link</button><button class="link" id="btn-cal-refresh">Check now</button></div>` : ""}
       ${recent ? `<h3>Recent</h3>${recent}` : ""}
       <p class="fine">The bot joins as a guest named “${esc((asst && asst.bot_name) || STATE.settings.bot_name || "Uno Notetaker")}”, so the host may have to let it in. It leaves when the call ends, when everyone else has left or after a long silence. KakaoTalk group calls have no link to open in a browser — the bot can't join those.</p>
     </section>`;
@@ -342,7 +483,7 @@ async function renderCalls() {
   if ($("#calls-settings")) $("#calls-settings").onclick = openSettings;
   if ($("#btn-cal-refresh")) $("#btn-cal-refresh").onclick = async (e) => { e.target.disabled = true; try { await api("/api/calendars/refresh", { method: "POST" }); } catch (err) { toast(err.message, "bad"); } renderCalls(); };
   $$("[data-stop]").forEach((b) => b.onclick = async () => { b.disabled = true; try { await api(`/api/calls/sessions/${b.dataset.stop}/stop`, { method: "POST" }); } catch (e) { toast(e.message, "bad"); } renderCalls(); });
-  $$("[data-cal-del]").forEach((b) => b.onclick = async () => { if (!confirm("Remove this calendar? The bot stops joining its calls.")) return; await api(`/api/calendars/${b.dataset.calDel}`, { method: "DELETE" }); await loadState(); renderCalls(); });
+  bindCalendarRows($("#main"), () => { if (view === "calls") renderCalls(); });
   $$("[data-ev]").forEach((cb) => cb.onchange = async () => {
     try { await api(`/api/calls/events/${cb.dataset.ev}`, { method: "PUT", body: JSON.stringify({ choice: cb.checked ? "join" : "skip" }) }); }
     catch (e) { toast(e.message, "bad"); }
@@ -935,6 +1076,9 @@ function openSettings() {
   $("#test-out").innerHTML = "";
   syncCustom();
   renderTelegram(STATE.telegram);
+  calBoxData = null;
+  $("#cal-box").innerHTML = `<p class="muted">Loading…</p>`;
+  renderCalendarBox();
   $("#dlg-settings").showModal();
 }
 function syncCustom() {

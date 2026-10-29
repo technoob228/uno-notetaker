@@ -123,3 +123,60 @@ Inbox, Telegram. Контракт с Work: `reports/day_2026-10-28/assistants-d-
   уведомление (GDPR). В РФ хранение записи — персональные данные (152-ФЗ). Otter и
   Fireflies судятся именно из-за «тихого» бота, поэтому бот у нас не тихий.
 - Отпечатки голоса считаются на компьютере пользователя и не сохраняются.
+
+## Календари из аккаунта Uno, без ассистента (0.7.0, 29.10.2026)
+
+Что видит человек: открыл Notetaker → Calls или Settings → Calendars → блок **From your Uno account**.
+Google Calendar (коннектор «Gmail & Calendar») и **Outlook & Teams** (новый коннектор `microsoft`)
+показаны строками: «Connected · адрес», «Not connected» + **Connect**, «Sign in again» + кнопка,
+«Not available yet» (консоль коннектор не предлагает). Подключено — работает само, вставлять ничего не
+надо, ассистент не нужен. Переключатель **Use calendars from my Uno account** (по умолчанию включён)
+выключает их. Ниже — **Other calendars (iCal link)**: поле для секретной ссылки и короткие шаги по
+каждому сервису (свёрнуты): Google (если не через Uno), Outlook.com / Microsoft 365, Яндекс, iCloud, Zoho.
+
+Как устроено (контракт: `reports/day_2026-10-29/notetaker-ecosystem/CONTRACT.md`):
+
+- Манифест: `"calendar": true` (и `"calls": true`, как в 0.5).
+- `GET /v1/calendars` раз в 3 минуты (кэш; после Connect интерфейс спрашивает каждые 4 с до 2 минут,
+  `GET /api/calendars/uno?fresh=1`, не чаще раза в 3 с). Пока Work недоступен — последний ответ.
+- Каждый `available` + `connected` провайдер — виртуальный календарь: `gmail` → `uno` («Google Calendar ·
+  from your Uno account»), `microsoft` → `uno-microsoft` («Outlook & Teams · from your Uno account»).
+  События — `GET /v1/calendar/events?provider=…&from&to`, тот же `from_feed`, что в 0.5.
+- Ключ встречи — id вхождения у провайдера: Google как в 0.5 (`sha1("g|id")`, старые выборы «не ходить»
+  остаются), Microsoft — `sha1("m|id")`, так что ключи двух провайдеров не совпадают никогда.
+- 424 `*_not_connected` / `*_reconnect` — это статус календаря в интерфейсе, не ошибка: в лог одна строка
+  при смене, известные встречи остаются, `loaded()` ложно, поэтому бота ни с какой встречи не снимает.
+  `needsReconnect` из списка — даже не спрашиваем события.
+- Microsoft (Graph `calendarView`) удалённую встречу не отдаёт как `cancelled` — она просто пропадает.
+  Пропала из полного фида (`complete: true`) — встречи нет, `bot.reconcile` снимает бота, который ещё не
+  вошёл. Фид, обрезанный на середине (`complete: false`), ничего не доказывает: ничего не снимается.
+- Адреса из `/v1/calendars` входят в `my_emails()` («вы отказались», «вы организатор»).
+- Без ассистента: бот «Uno Notetaker», правило из настроек, Inbox и свой Telegram — как в 0.4. С
+  ассистентом («Join my calls»): бот под его именем, заметки ему — как в 0.5; календари Uno он использует,
+  даже если переключатель в Notetaker выключен (его включили в Uno Work, выключать там же).
+- Старый Work (404 / `not_found` на `/v1/calendars`) — ровно как в 0.5: календарь `uno` (Google, без
+  параметра `provider`) только пока у ассистента включено «Join my calls». В интерфейсе: «нужен новый
+  Uno Work, пока — iCal-ссылка».
+- **Connect** во фрейме Uno Work: `window.parent.postMessage({type: "uno-work:connect", provider}, "*")` —
+  Work открывает свой штатный Connect. Не во фрейме — подсказка «Open Uno Work → Settings → Connectors».
+
+Один звонок — один бот. Одна и та же встреча из двух календарей (Google через Uno + iCal-ссылка того же
+календаря; приглашение в Teams и в Google, и в Outlook) — одна строка в Calls: одинаковая каноническая
+ссылка (код Meet, номер Zoom, id треда Teams `19:meeting_…@thread.v2` в любой кодировке, номер
+`teams.live.com/meet/…`) или одинаковый UID — в ту же минуту. У строки все ключи (`keys`); бот идёт, если
+так решает хоть один календарь; «не ходить» на строке действует на все её ключи. Первым считается
+календарь Uno (у него стабильный id). `bot.create` вдобавок не пустит второго бота на ту же ссылку.
+
+Инструкции для iCal (проверены 29.10.2026, в интерфейсе — 2–3 шага):
+
+| Сервис | Где ссылка |
+|---|---|
+| Google Calendar | ⚙ Settings → слева календарь в «Settings for my calendars» → Integrate calendar → «Secret address in iCal format» |
+| Outlook.com / Microsoft 365 | Outlook в браузере → ⚙ Settings → Calendar → Shared calendars → Publish a calendar («Can view all details») → ссылка ICS. Рабочий админ может запретить — тогда коннектор Outlook & Teams |
+| Яндекс Календарь | ⚙ у календаря в списке слева → «Экспорт» → iCal → скопировать |
+| iCloud | iCloud.com → Calendar → значок «поделиться» у календаря (iPhone: Calendars → ⓘ) → Public Calendar → ссылка; `webcal://` можно вставлять как есть |
+| Zoho Calendar | My Calendars → ⋮ у календаря → Share → «Enable private address for this calendar» → ссылка ICAL |
+
+Тесты: `app/tests/test_uno_calendars.py` (фейковый App API: список → виртуальные календари, параметр
+`provider`, 404, 424, `needsReconnect`, ключи Microsoft, дубликаты Google+iCal и Google+Outlook, удаление в
+Outlook, переключатель, без ассистента / с ассистентом).

@@ -313,6 +313,8 @@ async def put_settings(request: Request):
         if not url.startswith(("https://", "http://")):
             raise HTTPException(400, "The provider address must start with https://")
     save_settings(body)
+    if "uno_calendars" in body:
+        calendars.poke()  # Uno's calendars on/off: read them (or let them go) now
     return _state()
 
 
@@ -617,7 +619,7 @@ def telegram_test():
 
 @app.get("/api/calls")
 def calls_overview():  # sync: may read calendars
-    return bot.overview()
+    return {**bot.overview(), "uno": calendars.uno_status()}
 
 
 @app.post("/api/calls/join")
@@ -670,8 +672,27 @@ async def remove_calendar(cid: str):
     return {"ok": True}
 
 
+@app.get("/api/calendars")
+def list_calendars():
+    """Settings → Calendars: the Uno account's calendars and the iCal links."""
+    return {"uno": calendars.uno_status(), "calendars": calendars.public_list()}
+
+
+@app.get("/api/calendars/uno")
+def uno_calendars(fresh: int = 0):  # sync: may ask Uno Work
+    """The calendars of the Uno account and their state. fresh=1 (the UI after
+    "Connect"): ask Uno Work again now and read a newly connected one at once."""
+    if fresh:
+        before = {c["id"] for c in calendars.calendars()}
+        calendars.refresh_uno_list(force=True)
+        if {c["id"] for c in calendars.calendars()} - before:
+            calendars.refresh()  # only the new ones: the others were read minutes ago
+    return calendars.uno_status()
+
+
 @app.post("/api/calendars/refresh")
 def refresh_calendars():
+    calendars.refresh_uno_list(force=True)
     calendars.refresh(force=True)
     return bot.overview()
 
@@ -934,6 +955,9 @@ def write_manifest() -> None:
                 # the bot's name), the person's calendar through Uno, and what happened
                 # in a call / the notes going to the assistant (assistant.py).
                 "calls": True,
+                # The calendars of the person's Uno account (Google, Outlook & Teams) without
+                # an assistant: GET /v1/calendars, /v1/calendar/events?provider=… (calendars.py).
+                "calendar": True,
                 # Home widget "Last meeting · 3 action items" (the key: see widget_key).
                 "widget": {"path": f"/widget?k={widget_key()}", "size": "small", "title": "Last meeting"}}
     if APP_URL:

@@ -388,9 +388,17 @@ class Client:
         """Is an assistant sending this app to the person's calls? (Join my calls in Uno Work.)"""
         return self._json("GET", "/v1/assistant/link", timeout=15.0)
 
-    def calendar_events(self, start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Any]:
-        """The person's calendar (Google, through Uno) as JSON — only while Join my calls is on."""
-        q = {k: v for k, v in (("from", start), ("to", end)) if v}
+    def calendars(self) -> Dict[str, Any]:
+        """The calendars of the person's Uno account (manifest "calendar": true):
+        {"calendars": [{"provider": "gmail"|"microsoft", "name", "available", "connected",
+        "account", "needsReconnect"}]}. An older Uno Work answers 404."""
+        return self._json("GET", "/v1/calendars", timeout=15.0)
+
+    def calendar_events(self, start: Optional[str] = None, end: Optional[str] = None,
+                        provider: Optional[str] = None) -> Dict[str, Any]:
+        """The person's calendar through Uno as JSON (the calendar_feed shape). provider:
+        "gmail" (the default) or "microsoft". Older Uno Work: Google only, while Join my calls is on."""
+        q = {k: v for k, v in (("from", start), ("to", end), ("provider", provider)) if v}
         suffix = ("?" + urllib.parse.urlencode(q)) if q else ""
         return self._json("GET", "/v1/calendar/events" + suffix, timeout=45.0)
 

@@ -138,7 +138,7 @@ def create(url: str, title: str = "", event: dict | None = None) -> dict:
         for x in all_:
             if x["status"] in ACTIVE and calendars.canonical(x["url"]) == same:
                 return x
-            if event and x.get("event_key") == event["key"]:
+            if event and x.get("event_key") in (event.get("keys") or [event["key"]]):
                 moved = x.get("start") and x.get("start") != event.get("start")
                 if not moved or x["status"] in ACTIVE or x.get("meeting_id"):
                     return x  # once per occurrence (the person can send it again by hand)
@@ -389,7 +389,8 @@ def reconcile(now: datetime | None = None) -> int:
     lobby. A bot already recording stays — people may be in the call
     whatever the calendar says. → how many sessions changed."""
     now = now or datetime.now(timezone.utc)
-    events = {e["key"]: e for e in calendars.upcoming(include_past_hours=24)}
+    # every key of a meeting seen in two calendars points at its one row
+    events = {k: e for e in calendars.upcoming(include_past_hours=24) for k in e.get("keys") or [e["key"]]}
     known_cals = {c["id"] for c in calendars.calendars()}
     changed = 0
     for x in sessions():
@@ -468,7 +469,7 @@ def overview() -> dict:
     by_event = {x["event_key"]: x for x in all_ if x.get("event_key")}
     upcoming = []
     for ev in calendars.upcoming():
-        x = by_event.get(ev["key"])
+        x = next((by_event[k] for k in ev.get("keys") or [ev["key"]] if k in by_event), None)
         upcoming.append({k: ev[k] for k in ("key", "title", "start", "end", "platform", "platform_name", "url",
                                              "join", "why", "choice", "status")}
                         | {"attendees": len(ev.get("attendees") or []),

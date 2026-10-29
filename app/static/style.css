@@ -288,6 +288,19 @@ details.more[open] summary { margin-bottom: 10px; }
 .cals li .muted { flex: 1; font-size: 13px; }
 .howto dl { margin: 8px 0 0; font-size: 13.5px; }
 .howto dt { font-weight: 600; margin-top: 6px; } .howto dd { margin: 0; color: var(--muted); }
+/* calendars: from the Uno account + iCal links (Settings → Calendars, Calls) */
+.cal-box { display: grid; gap: 8px; }
+.cal-box .sub { margin: 6px 0 0; font-size: 13.5px; font-weight: 600; }
+.cal-box .ok { color: var(--ok); } .cal-box .bad { color: var(--bad); }
+.ucals li.ucal { align-items: center; justify-content: space-between; flex-wrap: nowrap; border-bottom: 1px solid var(--line); padding: 8px 0; }
+.ucals li.ucal:last-child { border-bottom: 0; }
+.ucal .ucal-name { min-width: 0; flex: 1; }
+.ucal.off .ucal-name b { color: var(--muted); }
+.btn.small-btn { min-height: 32px; padding: 5px 12px; font-size: 13.5px; flex: none; }
+.howto-list { display: grid; gap: 2px; }
+.howto-list details.howto summary { cursor: pointer; font-size: 13.5px; padding: 3px 0; }
+.howto-list details.howto ol { margin: 4px 0 6px; padding-left: 20px; font-size: 13.5px; color: var(--muted); display: grid; gap: 2px; }
+.howto-list details.howto .fine { margin: 0 0 6px; }
 .bot-panel { display: flex; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--rec); border-radius: 14px; padding: 16px 18px; margin-bottom: 18px; }
 .bot-panel > div { flex: 1; } .bot-panel p { margin: 2px 0 0; }
 @media (max-width: 760px) {

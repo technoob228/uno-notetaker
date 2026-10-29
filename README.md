@@ -4,10 +4,16 @@ Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
 
 - **A bot joins your calls** — Google Meet, Zoom, Microsoft Teams, Yandex
   Telemost, Zoho Meeting — as a guest named "Uno Notetaker", by itself for the
-  calls in your calendar (connect it by its secret iCal address: Google,
-  Outlook, Yandex, Zoho, iCloud) or when you send it by link. It records the
-  call and leaves when it ends; the notes come like for any recording. See
-  **Calls** in the app and `docs/bot.md`.
+  calls in your calendar or when you send it by link. It records the call and
+  leaves when it ends; the notes come like for any recording. See **Calls** in
+  the app and `docs/bot.md`.
+- **Calendars from your Uno account** (0.7.0): Google Calendar and Outlook &
+  Teams connected in Uno Work are used as they are — nothing to paste, no
+  assistant needed (Settings → Calendars → "From your Uno account"; **Connect**
+  opens Uno Work's own Connect). Any other calendar — Yandex, iCloud, Zoho,
+  Outlook without Uno — by its secret iCal address, with step-by-step
+  instructions per service in the app. The same meeting in two calendars gets
+  one bot.
 - **Record** a call in another browser tab (Google Meet, Zoom, Teams on the web):
   the tab's audio and your microphone are recorded as two tracks, so the
   transcript knows what *you* said. Or record a meeting in the room (mic only).
@@ -114,11 +120,14 @@ Elsewhere: set `UNO_HOME` to a folder for `Meetings`, and either
 app/notetaker/   FastAPI backend: config (keys, AI route), sso (Sign in with Uno), audio (ffmpeg), ai (STT/LLM),
                  pipeline (recording → transcript → notes), store (~/Meetings, search),
                  actions (action items from notes.md), deliver (Inbox, tasks), telegram (bot),
-                 calendars (iCal → calls), bot (the call bot's sessions, its API),
+                 calendars (iCal links + the Uno account's Google / Outlook & Teams → calls,
+                 one bot per call), assistant ("Join my calls" of a Uno Work assistant),
+                 bot (the call bot's sessions, its API),
                  uno_app.py (vendored Uno App SDK)
 bot/             the call bot: notetaker_bot/ (platforms.py — how to join each service,
                  session.py — one call, capture.py — PulseAudio + ffmpeg)
 app/tests/       unit tests: python3 -m unittest discover -s app/tests
+                 (test_uno_calendars.py — the Uno account's calendars against a fake App API)
 app/static/      the UI (plain JS, no build)
 testdata/        TTS test meetings (RU/EN) + smoke.py (end-to-end over the API)
                  + smoke_v2.py (action items, Inbox, tasks, search, widget, Telegram — against fakes)
@@ -147,7 +156,9 @@ testdata/        TTS test meetings (RU/EN) + smoke.py (end-to-end over the API)
 - The container drops root after fixing folder ownership and runs as the
   computer's user; the Uno Work state dir is mounted read-only.
 - Voice fingerprints are computed on the computer and never stored or sent.
-- Calendar links are secrets: kept in the state volume, shown masked. The bot
+- Calendar links are secrets: kept in the state volume, shown masked. The Uno
+  account's calendars come through the local App API with this app's own key —
+  no OAuth tokens in the app; Uno Work keeps them. The bot
   container holds no keys — only a token that opens `/api/bot/worker/*`.
 
 ## The bot that joins calls

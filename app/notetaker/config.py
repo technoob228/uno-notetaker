@@ -36,7 +36,7 @@ UNO_WORK_SETTINGS = os.environ.get("UNO_WORK_SETTINGS", "/uno-work/settings.json
 UNO_GATEWAY_URL = os.environ.get("UNO_LLM_BASE_URL", "https://api.getuno.xyz/v1").rstrip("/")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 APP_URL = os.environ.get("UNO_APP_URL", "")
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 USER_AGENT = f"uno-notetaker/{APP_VERSION}"
 
 DEFAULT_MODEL = "deepseek/deepseek-v3.2"
@@ -74,6 +74,8 @@ class Settings:
     tz_offset_min: int = -10000
     # Calendars (secret iCal links, see calendars.py) and the bot that joins calls.
     calendars: list = field(default_factory=list)   # [{id, url, name}] — set via /api/calendars only
+    # The calendars of the person's Uno account (Google, Outlook & Teams) through Uno Work.
+    uno_calendars: bool = True
     bot_auto_join: str = "all"         # all | accepted | off
     bot_name: str = "Uno Notetaker"
     bot_chat_message: bool = True      # say in the call's chat that it is recorded

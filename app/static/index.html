@@ -147,15 +147,7 @@
   <form method="dialog" class="dlg wide-dlg">
     <h2>Connect a calendar</h2>
     <p class="muted">Paste your calendar's <b>secret iCal address</b>. Notetaker reads it every few minutes and sends the bot to calls that have a link. It's read-only, and you can reset the address in your calendar any time.</p>
-    <details class="howto" open><summary>Where to find it</summary>
-      <dl>
-        <dt>Google Calendar</dt><dd>Settings (⚙) → click your calendar on the left → <b>Integrate calendar</b> → <b>Secret address in iCal format</b>.</dd>
-        <dt>Outlook / Microsoft 365</dt><dd>Settings → Calendar → <b>Shared calendars</b> → <b>Publish a calendar</b> → “Can view all details” → Publish → copy the <b>ICS</b> link.</dd>
-        <dt>Yandex Calendar</dt><dd>The calendar's ⋯ → <b>Settings</b> → <b>Export</b> → copy the link.</dd>
-        <dt>Zoho Calendar</dt><dd>Settings → My calendars → the calendar → <b>Export</b> → private iCal address.</dd>
-        <dt>Apple iCloud</dt><dd>Calendar → share icon → <b>Public Calendar</b> → copy the link (webcal://…).</dd>
-      </dl>
-    </details>
+    <div class="howto-list" id="cal-howto"></div>
     <label class="field">iCal address <input name="url" id="cal-url" required autocomplete="off" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"></label>
     <div class="dlg-actions">
       <button value="cancel" class="btn" formnovalidate>Cancel</button>
@@ -178,6 +170,9 @@
 
     <h3>On your phone</h3>
     <p class="fine">Open this page on your phone and choose <b>Add to Home Screen</b>. You can record voice memos and meetings in the room from there; on Android, <b>Share</b> a recording from any app to Notetaker. Or send it to your Telegram bot.</p>
+
+    <h3>Calendars</h3>
+    <div class="cal-box" id="cal-box"></div>
 
     <h3>Calls and the bot</h3>
     <label class="field">The bot joins <select name="bot_auto_join">
