@@ -371,11 +371,35 @@ def _open_actions(mid: str) -> int:
     return sum(1 for it in store._cached(mid, "notes.md", actions.parse) if not it["done"])
 
 
+_SUMMARY_HEAD = re.compile(r"^#{2,4}\s+(summary|резюме|итоги|кратко|overview)", re.I)
+
+
+def summary_line(notes: str) -> str:
+    """The first line of the notes' Summary (or the first plain line) — the
+    preview under a meeting on the home page."""
+    lines = notes.splitlines()
+    start = next((i + 1 for i, ln in enumerate(lines) if _SUMMARY_HEAD.match(ln.strip())), 0)
+    for ln in lines[start:]:
+        t = ln.strip()
+        if not t or t.startswith("# "):
+            continue
+        if t.startswith("#"):
+            if start:
+                break
+            continue
+        t = re.sub(r"^([-*]|\d+[.)])\s+(\[[ xX]\]\s+)?", "", t)
+        t = re.sub(r"\*\*|`|\s*\[\d{1,2}:\d{2}(?::\d{2})?\]", "", t).strip()
+        if t:
+            return t[:220]
+    return ""
+
+
 @app.get("/api/meetings")
 async def list_meetings(q: str = ""):
     meetings = store.search(q) if q.strip() else store.list_all()
     for m in meetings:
         m["open_actions"] = _open_actions(m["id"]) if m["status"] == "done" else 0
+        m["preview"] = store._cached(m["id"], "notes.md", summary_line) if m["status"] == "done" else ""
     return {"meetings": meetings}
 
 

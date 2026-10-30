@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-29T00:00:00Z",
+  "title": "Design System: Uno Notetaker",
+  "extensions": {
+    "colorMeta": {
+      "accent": { "role": "primary", "displayName": "Uno Indigo", "canonical": "oklch(0.55 0.22 273)", "tonalRamp": ["oklch(0.20 0.22 273)", "oklch(0.30 0.22 273)", "oklch(0.40 0.22 273)", "oklch(0.55 0.22 273)", "oklch(0.68 0.18 273)", "oklch(0.80 0.10 273)", "oklch(0.90 0.05 273)", "oklch(0.96 0.02 273)"] },
+      "page": { "role": "neutral", "displayName": "Page White", "canonical": "#ffffff", "tonalRamp": ["#18181b", "#3f3f46", "#6b6b75", "#9a9aa3", "#e7e7ea", "#f0f0f2", "#f7f7f8", "#ffffff"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#18181b", "tonalRamp": ["#18181b", "#3f3f46", "#6b6b75", "#9a9aa3", "#e7e7ea", "#f0f0f2", "#f7f7f8", "#ffffff"] },
+      "ok": { "role": "semantic", "displayName": "Done Green", "canonical": "#18794e" },
+      "warn": { "role": "semantic", "displayName": "Due Amber", "canonical": "#8a5a00" },
+      "bad": { "role": "semantic", "displayName": "Error Red", "canonical": "#c62a2f" },
+      "rec": { "role": "semantic", "displayName": "Record Red", "canonical": "#e5484d" }
+    },
+    "typographyMeta": {
+      "page-title": { "displayName": "Page title", "purpose": "Editable meeting title." },
+      "headline": { "displayName": "Headline", "purpose": "Page headings and Home greeting." },
+      "title": { "displayName": "Title", "purpose": "Section headings inside rendered notes." },
+      "reading": { "displayName": "Reading", "purpose": "The notes document, 15.5px / 1.68." },
+      "body": { "displayName": "Body", "purpose": "Sidebar, rows, forms." },
+      "label": { "displayName": "Label", "purpose": "Metadata, timestamps, day headers; sentence case." },
+      "mono": { "displayName": "Mono", "purpose": "Raw-notes editor and inline code only." }
+    },
+    "shadows": [
+      { "name": "shadow-sm", "value": "0 1px 2px rgb(16 16 24 / 0.06)", "purpose": "Buttons, active list item, selected segmented tab." },
+      { "name": "shadow", "value": "0 1px 2px rgb(16 16 24 / 0.05), 0 4px 14px -4px rgb(16 16 24 / 0.10)", "purpose": "Ask input, recording card, hovered starter cards." },
+      { "name": "shadow-lg", "value": "0 2px 6px rgb(16 16 24 / 0.06), 0 24px 60px -12px rgb(16 16 24 / 0.28)", "purpose": "Floating things only: menus, dialogs, player pill, toasts." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "All entrances and toggles, 150-300ms." },
+      { "name": "pulse", "value": "1.6s infinite", "purpose": "Live recording dot." }
+    ],
+    "breakpoints": [
+      { "name": "phone", "value": "760px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action in a view or dialog.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Record a call</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border-radius:7px;border:1px solid var(--line,#e7e7ea);background:var(--raise,#fff);color:var(--ink,#18181b);font:540 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;cursor:pointer;box-shadow:0 1px 2px rgb(16 16 24/.06);transition:background .15s,border-color .15s,transform .1s}.ds-btn:active{transform:translateY(.5px)}.ds-btn:focus-visible{outline:2px solid color-mix(in oklch,var(--accent,#4f46e5) 70%,transparent);outline-offset:2px}.ds-btn-primary{background:var(--accent,#4f46e5);border-color:transparent;color:#fff;box-shadow:0 1px 2px color-mix(in oklch,var(--accent,#4f46e5) 40%,transparent),inset 0 1px 0 rgb(255 255 255/.12)}.ds-btn-primary:hover{background:color-mix(in oklch,var(--accent,#4f46e5) 90%,black)}"
+    },
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Secondary action: raised fill, hairline border.",
+      "html": "<button class=\"ds-btn2\">Share</button>",
+      "css": ".ds-btn2{height:34px;padding:0 14px;border-radius:7px;border:1px solid var(--line,#e7e7ea);background:var(--raise,#fff);color:var(--ink,#18181b);font:540 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;cursor:pointer;box-shadow:0 1px 2px rgb(16 16 24/.06);transition:background .15s}.ds-btn2:hover{background:color-mix(in oklch,var(--raise,#fff) 94%,var(--ink,#18181b))}.ds-btn2:focus-visible{outline:2px solid color-mix(in oklch,var(--accent,#4f46e5) 70%,transparent);outline-offset:2px}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "36px field with indigo halo on focus.",
+      "html": "<input class=\"ds-input\" placeholder=\"Meeting link\">",
+      "css": ".ds-input{height:36px;padding:0 11px;border-radius:7px;border:1px solid var(--line,#e7e7ea);background:var(--raise,#fff);font:400 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:var(--ink,#18181b);outline:none;transition:border-color .15s,box-shadow .15s}.ds-input::placeholder{color:var(--faint,#9a9aa3)}.ds-input:focus{border-color:color-mix(in oklch,var(--accent,#4f46e5) 50%,var(--line,#e7e7ea));box-shadow:0 0 0 3px color-mix(in oklch,var(--accent,#4f46e5) 14%,transparent)}"
+    },
+    {
+      "name": "View Tab",
+      "kind": "nav",
+      "refersTo": "view-tab",
+      "description": "Sidebar view row with icon, label and count; selected is a gray press fill.",
+      "html": "<a class=\"ds-tab on\" href=\"#\"><span>Meetings</span><span class=\"ds-count\">12</span></a>",
+      "css": ".ds-tab{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px;color:var(--ink-2,#3f3f46);font:500 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;text-decoration:none}.ds-tab:hover{background:rgb(24 24 27/.045)}.ds-tab.on{background:rgb(24 24 27/.08);color:var(--ink,#18181b)}.ds-count{margin-left:auto;font-size:12px;color:var(--muted,#6b6b75);font-variant-numeric:tabular-nums}.ds-tab:focus-visible{outline:2px solid color-mix(in oklch,var(--accent,#4f46e5) 70%,transparent);outline-offset:2px}"
+    },
+    {
+      "name": "Segmented Tabs",
+      "kind": "nav",
+      "refersTo": "segmented-tab",
+      "description": "Notes / Transcript / Ask switcher in a sunk track.",
+      "html": "<div class=\"ds-seg\"><button class=\"on\">Notes</button><button>Transcript</button><button>Ask</button></div>",
+      "css": ".ds-seg{display:flex;gap:2px;padding:3px;background:var(--sunk,#f3f3f5);border-radius:9px;width:max-content}.ds-seg button{height:28px;padding:0 12px;border:0;border-radius:7px;background:transparent;color:var(--muted,#6b6b75);font:540 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;cursor:pointer}.ds-seg button:hover{color:var(--ink,#18181b)}.ds-seg button.on{background:var(--raise,#fff);color:var(--ink,#18181b);box-shadow:0 1px 2px rgb(16 16 24/.06)}.ds-seg button:focus-visible{outline:2px solid color-mix(in oklch,var(--accent,#4f46e5) 70%,transparent);outline-offset:2px}"
+    },
+    {
+      "name": "Suggestion Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Pill suggestion that tints indigo on hover.",
+      "html": "<button class=\"ds-chip\">What did we decide?</button>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 13px;border-radius:99px;border:1px solid var(--line,#e7e7ea);background:var(--raise,#fff);color:var(--ink,#18181b);font:400 13.5px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;cursor:pointer;transition:border-color .15s,background .15s}.ds-chip:hover{border-color:color-mix(in oklch,var(--accent,#4f46e5) 40%,var(--line,#e7e7ea));background:color-mix(in oklch,var(--accent,#4f46e5) 10%,var(--bg,#fff))}.ds-chip:focus-visible{outline:2px solid color-mix(in oklch,var(--accent,#4f46e5) 70%,transparent);outline-offset:2px}"
+    },
+    {
+      "name": "Event Row Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Coming-up panel: time column, name with sub line, join switch.",
+      "html": "<div class=\"ds-panel\"><div class=\"ds-ev\"><span class=\"ds-time\">10:00<span>10:30</span></span><span class=\"ds-name\">Weekly sync<small>Meet - 4 guests</small></span></div><div class=\"ds-ev\"><span class=\"ds-time\">14:00<span>15:00</span></span><span class=\"ds-name\">Demo call<small>Zoom - 2 guests</small></span></div></div>",
+      "css": ".ds-panel{border:1px solid var(--line,#e7e7ea);border-radius:14px;background:var(--raise,#fff);overflow:hidden;font:400 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:var(--ink,#18181b)}.ds-ev{display:grid;grid-template-columns:64px 1fr;gap:14px;align-items:center;padding:11px 16px}.ds-ev+.ds-ev{border-top:1px solid var(--line-soft,#f0f0f2)}.ds-time{font-weight:600;font-size:13.5px;font-variant-numeric:tabular-nums;line-height:1.25}.ds-time span{display:block;color:var(--faint,#9a9aa3);font-weight:450;font-size:12px}.ds-name{font-weight:560}.ds-name small{display:block;font-weight:400;color:var(--muted,#6b6b75);font-size:12.5px}"
+    },
+    {
+      "name": "Action Item",
+      "kind": "custom",
+      "refersTo": "checkbox",
+      "description": "Custom indigo checkbox row; done state is faint and struck through.",
+      "html": "<label class=\"ds-action\"><input type=\"checkbox\" checked><span>Send the proposal</span></label>",
+      "css": ".ds-action{display:flex;gap:11px;align-items:flex-start;padding:7px 8px;border-radius:8px;cursor:pointer;font:400 15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:var(--ink,#18181b)}.ds-action:hover{background:rgb(24 24 27/.045)}.ds-action input{appearance:none;-webkit-appearance:none;flex:none;width:17px;height:17px;margin:3px 0 0;border-radius:5px;border:1.5px solid color-mix(in oklch,var(--ink,#18181b) 30%,var(--bg,#fff));background:var(--raise,#fff);display:grid;place-items:center;cursor:pointer}.ds-action input::after{content:'';width:9px;height:5px;border:2px solid #fff;border-top:0;border-right:0;transform:rotate(-45deg) translate(1px,-1px) scale(0);transition:transform .18s cubic-bezier(.16,1,.3,1)}.ds-action input:checked{background:var(--accent,#4f46e5);border-color:var(--accent,#4f46e5)}.ds-action input:checked::after{transform:rotate(-45deg) translate(1px,-1px) scale(1)}.ds-action input:checked+span{color:var(--faint,#9a9aa3);text-decoration:line-through}.ds-action input:focus-visible{outline:2px solid color-mix(in oklch,var(--accent,#4f46e5) 70%,transparent);outline-offset:2px}"
+    },
+    {
+      "name": "Player Pill",
+      "kind": "custom",
+      "refersTo": "player",
+      "description": "Floating audio pill: ink play button, scrubber, speed chip.",
+      "html": "<div class=\"ds-player\"><button class=\"ds-play\" aria-label=\"Play\"></button><span class=\"ds-t\">0:42</span><span class=\"ds-track\"></span><button class=\"ds-speed\">1x</button></div>",
+      "css": ".ds-player{display:flex;align-items:center;gap:10px;max-width:560px;padding:7px 14px 7px 7px;border-radius:99px;background:color-mix(in srgb,var(--raise,#fff) 92%,transparent);border:1px solid var(--line,#e7e7ea);box-shadow:0 2px 6px rgb(16 16 24/.06),0 24px 60px -12px rgb(16 16 24/.28);backdrop-filter:blur(12px);font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}.ds-play{width:34px;height:34px;border-radius:50%;border:0;background:var(--ink,#18181b);cursor:pointer;flex:none}.ds-play:focus-visible,.ds-speed:focus-visible{outline:2px solid color-mix(in oklch,var(--accent,#4f46e5) 70%,transparent);outline-offset:2px}.ds-t{color:var(--muted,#6b6b75);font-variant-numeric:tabular-nums}.ds-track{flex:1;height:4px;border-radius:99px;background:linear-gradient(to right,var(--ink,#18181b) 30%,color-mix(in oklch,var(--ink,#18181b) 14%,var(--bg,#fff)) 30%)}.ds-speed{height:26px;min-width:40px;border-radius:99px;border:1px solid var(--line,#e7e7ea);background:transparent;font-weight:600;color:var(--ink-2,#3f3f46);cursor:pointer}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Plain Meeting Notebook",
+    "overview": "The category standard played straight. A white page, a quiet gray sidebar holding the meetings list by day, and a single reading column for the notes. One indigo accent (Uno Work's own) marks the primary action, selected form controls and the current transcript line. Density is calm and Operate-mode: 14px chrome, 15.5px notes. Light and dark both ship; dark follows the system as a full token remap. The plumbing (providers, models, keys) never appears in the main chrome.",
+    "keyCharacteristics": [
+      "White page, #f7f7f8 sidebar, ink #18181b; one indigo accent used on rare, meaningful marks.",
+      "One system UI sans for everything, weight and tracking doing the hierarchy; mono only in the raw-notes editor and inline code.",
+      "Hairline borders first, shadow second; shadows are soft and blurred, never hard-offset.",
+      "1.75px-stroke inline SVG icons from one sprite, 16px, currentColor.",
+      "Sentence-case labels everywhere; no uppercase, no tracking-widened labels.",
+      "Status color is semantic and sparse: green done, amber due/warning, red error, a separate red for the live recording dot."
+    ],
+    "rules": [
+      { "name": "The One Indigo Rule", "body": "Indigo marks an action or a selection, never decoration. A screen carries at most a primary button, its checked controls, and the current transcript line in indigo.", "section": "colors" },
+      { "name": "The Hairline Before Shadow Rule", "body": "Separate regions with a 1px line or line-soft border; reach for a shadow only for things that float or are being pressed.", "section": "colors" },
+      { "name": "The Tint, Don't Invent Rule", "body": "New states are derived with color-mix from existing tokens; do not add a new hue for a new state.", "section": "colors" },
+      { "name": "The Sentence Case Rule", "body": "Every label, day header and section title is sentence case at its natural width. No uppercase, no widened tracking, no small-caps captions.", "section": "typography" },
+      { "name": "The Reading Column Rule", "body": "Long text sits in a 760px column at 15.5px/1.68; chrome stays at 14px or below.", "section": "typography" },
+      { "name": "The Float-Only Rule", "body": "Large shadow means above the page (menu, dialog, player, toast). A panel that sits in the flow gets a border, not a large shadow.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep indigo to the primary action, checked controls and the current transcript line (The One Indigo Rule).",
+      "Do use muted for any text a person has to read, and faint only for placeholders and decorative marks.",
+      "Do write labels in sentence case and keep page-section titles at 15px, weight 640.",
+      "Do build new surfaces from the existing set: panel, row, chip, button, dialog; separate with line-soft.",
+      "Do use the sprite icons (16px, 1.75px stroke, currentColor) and tabular numerals for times and counts.",
+      "Do ship both themes by adding any new color as a token with a dark value in the prefers-color-scheme block.",
+      "Do keep provider, model and key vocabulary out of the main chrome; it belongs behind the Advanced fold in settings."
+    ],
+    "donts": [
+      "Don't add a second accent hue or a gradient; derive tints with color-mix from existing tokens.",
+      "Don't use hard offset shadows or large shadows on in-flow panels.",
+      "Don't introduce uppercase or letter-spaced micro-labels above headings; the build has none and new surfaces should not start.",
+      "Don't reach for glyph or emoji icons; add a symbol to the sprite.",
+      "Don't use a colored border-stripe on cards or a colored fill for the selected sidebar row (it is a gray press tint).",
+      "Don't style a destructive action as a solid red button inside a flow; red text, with a confirm, is the pattern.",
+      "Don't inherit the third-party brand colors (Meet green, Zoom blue, Teams violet) as system colors; they are tags for outside products only."
+    ]
+  }
+}

@@ -2,6 +2,11 @@
 
 Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
 
+- **A new look** (0.8.0): one calm library like Granola. Meetings by day on
+  the left with a short summary line, the notes as a clean document (action
+  items on top, a floating player, Notes / Transcript / Ask), one **New
+  meeting** menu for every way to start, and Settings as a sheet with the rare
+  options (AI, speech-to-text, defaults) under Advanced. Light and dark themes.
 - **A bot joins your calls** — Google Meet, Zoom, Microsoft Teams, Yandex
   Telemost, Zoho Meeting — as a guest named "Uno Notetaker", by itself for the
   calls in your calendar or when you send it by link. It records the call and

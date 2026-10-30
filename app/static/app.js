@@ -7,6 +7,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const PIECE = 8 * 1024 * 1024;
 const BUSY = ["queued", "transcribing", "summarizing", "uploading"];
 const phone = () => window.matchMedia("(max-width: 760px)").matches;
+const ic = (name, cls = "") => `<svg class="ic ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
 let STATE = null;
 let current = null;      // meeting id on screen
@@ -96,10 +97,9 @@ async function loadState() {
   STATE = await api("/api/state");
   const p = STATE.provider;
   const el = $("#ai-status");
-  const pill = { app: "Computer AI ✓", gateway: "Uno AI ✓", custom: "Custom AI ✓" };
-  el.textContent = p.ready ? (pill[p.route] || "AI ✓") : "AI not set up";
+  const pill = { app: "AI of this computer", gateway: "Uno AI", custom: "Your AI provider" };
+  el.innerHTML = p.ready ? `<span class="dot-ok"></span> ${pill[p.route] || "AI"} is ready` : `<span class="dot-bad"></span> No AI for notes yet`;
   el.title = p.ready ? `AI: ${p.route_label} — ${p.source}` : "";
-  el.className = `ai-status ${p.ready ? "ok" : "bad"}`;
   for (const id of ["#rec-template", "#up-template", "#set-template"]) {
     const pickable = STATE.pickable_templates || Object.keys(STATE.templates);
     $(id).innerHTML = Object.entries(STATE.templates).filter(([k]) => pickable.includes(k)).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
@@ -142,16 +142,24 @@ async function loadList() {
     lastDay = day;
     return `${head}<a href="#/m/${m.id}" class="item ${m.id === current ? "active" : ""}" data-id="${m.id}">
       <span class="t">${esc(m.title || (m.status === "done" ? "Untitled meeting" : "New meeting"))}</span>
-      <span class="s">${new Date(m.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}${m.duration ? " · " + fmtTs(m.duration) : ""}
-        ${m.source === "screen" ? `<span class="pill screen-pill" title="Screen recording from Uno Work">Screen</span>` : ""}${m.open_actions ? `<span class="pill">${plural(m.open_actions, "to-do")}</span>` : ""}${statusBadge(m.status)}</span>
+      <span class="s"><span class="src" title="${esc(SOURCE_LABEL[m.source] || "")}">${ic(SOURCE_ICON[m.source] || "notes")}</span>${fmtTime(m.created_at)}${m.duration ? " · " + fmtDur(m.duration) : ""}
+        ${statusBadge(m.status)}${m.open_actions ? `<span class="todo" title="${plural(m.open_actions, "open action item")}">${ic("todo")}${m.open_actions}</span>` : ""}</span>
     </a>`;
   }).join("");
   return meetings;
+}
+const SOURCE_ICON = { bot: "bot", browser: "tab", upload: "upload", telegram: "send", screen: "screen" };
+const SOURCE_LABEL = { bot: "The notetaker joined the call", browser: "Recorded in the browser", upload: "Uploaded", telegram: "From Telegram", screen: "Screen recording from Uno Work" };
+function fmtDur(sec) {
+  const m = Math.round((sec || 0) / 60);
+  if (m < 1) return `${Math.max(1, Math.round(sec || 0))} s`;
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}`;
 }
 function dayLabel(iso) {
   const d = new Date(iso), t = new Date();
   if (d.toDateString() === t.toDateString()) return "Today";
   if (new Date(t - 864e5).toDateString() === d.toDateString()) return "Yesterday";
+  if (new Date(+t + 864e5).toDateString() === d.toDateString()) return "Tomorrow";
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 function mark(text, q) {
@@ -175,26 +183,123 @@ function showHome() {
   clearInterval(pollTimer);
   setView("list");
   const p = STATE.provider;
+  const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   $("#main").innerHTML = `
-    <section class="home">
-      <h1>Meeting notes, done for you</h1>
-      <p class="lead">Record a call or upload a file. You get a transcript with speakers, a summary and action items — sent to your Inbox${STATE.telegram.paired ? " and Telegram" : ""}, saved in <code>~/Meetings</code>.</p>
-      <div class="cards">
-        <button class="card" id="home-record"><span class="ic ic-rec" aria-hidden="true"></span><b>Record</b><span>A call in another tab (Meet, Zoom, Teams) or a meeting in the room.</span></button>
-        <button class="card" id="home-upload"><span class="ic up">⬆</span><b>Upload a recording</b><span>Audio or video: m4a, mp3, wav, mp4, webm…</span></button>
-      </div>
-      ${p.ready ? "" : `<div class="warn">The AI is not set up yet. <button class="link" id="home-settings">Open Settings</button></div>`}
-      <div class="tips">
-        <div><b>From your phone</b><span>${STATE.telegram.paired ? `Send a voice message or a recording to <b>@${esc(STATE.telegram.bot)}</b> in Telegram.` : `Connect a Telegram bot in <button class="link inline" id="tip-tg">Settings</button> and send recordings to it.`} Or open this page on the phone and add it to the Home Screen.</span></div>
-        <div><b>A bot that joins your calls</b><span>${STATE.calendars ? `The bot joins the calls in your calendar by itself. For any other call, paste its link in <a href="#/calls">Calls</a>.` : `Connect your calendar in <a href="#/calls">Calls</a> — Google or Outlook from your Uno account, or any calendar by its iCal link — and the bot joins by itself: Meet, Zoom, Teams, Telemost, Zoho. Or paste a call link there.`} The host may have to let it in from the lobby; Zoom goes through its web client.</span></div>
-      </div>
-      <p class="fine">Recording other people? Tell them first — in many places it's required by law.</p>
+    <section class="page home">
+      <h1 class="home-title">${greeting()}</h1>
+      <p class="home-date">${esc(today)}</p>
+      ${p.ready ? "" : `<div class="notice">${ic("alert")}<span>Notes need an AI. Uno AI works by itself on a Uno computer, and this one can't reach it. <button class="link" id="home-settings">Choose an AI</button></span></div>`}
+      <div class="sec" id="home-next"><div class="sec-head"><h2>Coming up</h2></div><div class="panel"><div class="row muted">Loading…</div></div></div>
+      <div class="sec" id="home-recent"></div>
     </section>`;
-  $("#home-record").onclick = openRecordDialog;
-  $("#home-upload").onclick = () => $("#file-input").click();
-  if (!p.ready) $("#home-settings").onclick = openSettings;
-  if ($("#tip-tg")) $("#tip-tg").onclick = openSettings;
-  loadList();
+  if (!p.ready) $("#home-settings").onclick = () => openSettings("set-adv");
+  loadList().then(renderRecent).catch(() => {});
+  renderComingUp();
+}
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? "Good night" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+}
+
+// Home: the next calls and whether the notetaker joins them.
+async function renderComingUp() {
+  const box = $("#home-next");
+  if (!box) return;
+  let d;
+  try { d = await api("/api/calls"); } catch { box.hidden = true; return; }
+  if (!$("#home-next")) return;
+  const now = new Date();
+  const calls = d.upcoming.filter((e) => e.url && new Date(e.end) > now).slice(0, 6);
+  const anyCal = d.calendars.length > 0;
+  let body;
+  if (!anyCal) {
+    body = connectPanel(d.uno);
+  } else if (!calls.length) {
+    body = `<div class="panel"><div class="row muted">${ic("calendar")} No calls with a link in the next 7 days.</div></div>`;
+  } else {
+    body = `<div class="panel">${eventRows(calls, { compact: true })}</div>`;
+  }
+  const off = anyCal && !d.worker.online ? `<p class="fine" style="margin-top:8px">${ic("alert")} The notetaker can't join calls right now: its call service isn't running on this computer.</p>` : "";
+  box.innerHTML = `<div class="sec-head"><h2>Coming up</h2>${anyCal ? `<span class="aside">${esc(joinRule(d))} · <a href="#/calls">All calls</a></span>` : ""}</div>${body}${off}`;
+  bindEventSwitches(box, renderComingUp);
+  bindCalendarRows(box, () => renderComingUp());
+  if ($("#home-cal-link", box)) $("#home-cal-link", box).onclick = openCalendarDialog;
+  if ($("#home-send-bot", box)) $("#home-send-bot", box).onclick = openBotDialog;
+}
+
+// Not a single calendar yet: Google / Outlook from the Uno account in one click, or a link.
+function connectPanel(u) {
+  const rows = u && u.work && u.supported !== false ? u.calendars.filter((c) => c.state !== "unavailable") : [];
+  const btns = rows.map((c) => c.state === "connected" ? "" :
+    `<button type="button" class="btn ${rows[0] === c ? "primary" : ""}" data-uno-connect="${c.provider}" ${unoWatch && unoWatch.provider === c.provider ? "disabled" : ""}>${ic("calendar")} ${unoWatch && unoWatch.provider === c.provider ? "Waiting for Uno Work…" : `Connect ${esc(c.provider === "gmail" ? "Google Calendar" : "Outlook & Teams")}`}</button>`).join("");
+  const hint = Object.values(unoHint)[0];
+  return `<div class="panel connect">
+    <h3>Let the notetaker join your calls</h3>
+    <p>Connect your calendar and it joins calls with a link by itself: Google Meet, Zoom, Teams, Telemost, Zoho. You get the notes after each call.</p>
+    <div class="btns">${btns}<button type="button" class="btn ${btns ? "ghost" : "primary"}" id="home-cal-link">${ic("link")} Add a calendar by link</button><button type="button" class="btn ghost" id="home-send-bot">${ic("bot")} Send to a call</button></div>
+    ${hint ? `<p class="fine" style="margin:12px 0 0">${hint}</p>` : ""}
+  </div>`;
+}
+
+function joinRule(d) {
+  const asst = STATE.assistant && STATE.assistant.active;
+  if (asst) return "Joins calls you're in with someone else";
+  return { all: "Joins every call with a link", accepted: "Joins calls you accepted", off: "Joins only when you send it" }[STATE.settings.bot_auto_join] || "";
+}
+
+function eventRows(events, { compact = false } = {}) {
+  let lastDay = "";
+  const now = new Date();
+  return events.map((e) => {
+    const day = new Date(e.start).toDateString();
+    const head = day !== lastDay ? `<div class="day-sep">${dayLabel(e.start)}</div>` : "";
+    lastDay = day;
+    const s = e.session;
+    const live = new Date(e.start) <= now && new Date(e.end) > now;
+    const state = s ? `<span class="st st-${s.status}">${esc(CALL_STATUS[s.status] || s.status)}</span>${s.meeting_id ? ` · <a href="#/m/${s.meeting_id}">notes</a>` : ""}`
+      : (e.join ? "" : `<span>${esc(e.why || "Won't join")}</span>`);
+    const past = new Date(e.end) < now;
+    return `${head}<div class="ev ${e.join ? "" : "off"} ${past ? "past" : ""}">
+      <span class="ev-time">${fmtTime(e.start)}<span class="ev-end">${fmtTime(e.end)}</span></span>
+      <span class="ev-title"><span class="ev-name">${esc(e.title || "Busy")}</span>
+        <span class="ev-sub">${platformTag(e.platform)}${e.attendees ? `<span>· ${plural(e.attendees, "guest")}</span>` : ""}${live && !s ? `<span class="now-chip">· now</span>` : ""}${state ? `<span>·</span>${state}` : ""}</span></span>
+      <label class="switch" title="${e.join ? "The notetaker joins this call" : "The notetaker won't join"}"><span class="${compact ? "only-desktop" : ""}">${e.join ? "Joins" : "Off"}</span><input type="checkbox" data-ev="${e.key}" ${e.join ? "checked" : ""} ${past || s ? "disabled" : ""} aria-label="Notetaker joins ${esc(e.title || "this call")}"><i></i></label>
+    </div>`;
+  }).join("");
+}
+function bindEventSwitches(root, refresh) {
+  $$("[data-ev]", root).forEach((cb) => cb.onchange = async () => {
+    try { await api(`/api/calls/events/${cb.dataset.ev}`, { method: "PUT", body: JSON.stringify({ choice: cb.checked ? "join" : "skip" }) }); }
+    catch (e) { toast(e.message, "bad"); }
+    refresh();
+  });
+}
+
+// Home: the latest notes, with the first line of each summary.
+function renderRecent(meetings) {
+  const box = $("#home-recent");
+  if (!box || !meetings) return;
+  if (!meetings.length) {
+    box.innerHTML = `<div class="sec-head"><h2>Start your first notes</h2></div>
+      <div class="starters">
+        <button class="starter" data-new="call">${ic("tab")}<b>Record a call</b><span>Meet, Zoom or Teams in another tab of this browser.</span></button>
+        <button class="starter" data-new="mic">${ic("mic")}<b>Record in the room</b><span>A meeting around a table or a voice memo.</span></button>
+        <button class="starter" data-new="upload">${ic("upload")}<b>Upload a recording</b><span>Audio or video: m4a, mp3, wav, mp4…</span></button>
+      </div>
+      <p class="fine" style="margin-top:14px">Recording other people? Tell them first — in many places it's required by law.${STATE.telegram.paired ? ` You can also send a voice message to <b>@${esc(STATE.telegram.bot)}</b> in Telegram.` : ""}</p>`;
+    bindNew(box);
+    return;
+  }
+  const rows = meetings.slice(0, 8).map((m) => {
+    const busy = BUSY.includes(m.status) || m.status === "recording";
+    const prev = m.preview || (busy ? (m.progress || "Working on the notes…") : m.status === "error" ? "Something went wrong — open it to retry." : "");
+    return `<a class="note-row" href="#/m/${m.id}">
+      <div class="nr-top"><span class="nr-title">${esc(m.title || (m.status === "done" ? "Untitled meeting" : "New meeting"))}</span><span class="nr-when">${esc(fmtDate(m.created_at))}</span></div>
+      ${prev ? `<div class="nr-prev">${esc(prev)}</div>` : ""}
+      <div class="nr-meta"><span>${ic(SOURCE_ICON[m.source] || "notes")}${esc(SOURCE_LABEL[m.source] || "")}</span>${m.duration ? `<span>${ic("clock")}${fmtDur(m.duration)}</span>` : ""}${m.open_actions ? `<span>${ic("todo")}${plural(m.open_actions, "action item")}</span>` : ""}${busy || m.status === "error" ? statusBadge(m.status) : ""}</div>
+    </a>`;
+  }).join("");
+  box.innerHTML = `<div class="sec-head"><h2>Recent notes</h2></div><div class="panel">${rows}</div>`;
 }
 
 // ---- action items across meetings --------------------------------------------
@@ -213,13 +318,13 @@ async function showActions() {
   }).join("");
   $("#main").innerHTML = `
     <section class="page">
+      <a href="#/" class="back only-phone">${ic("back")} Meetings</a>
       <header class="page-head">
-        <a href="#/" class="back only-phone">‹ Meetings</a>
         <h1>Action items</h1>
         <label class="check small"><input type="checkbox" id="show-done" ${showDone ? "checked" : ""}> Show done</label>
       </header>
-      <p class="muted">From the notes of every meeting. Tick one off here or in the meeting — it's the same checkbox in <code>notes.md</code>.</p>
-      <div class="actions-list">${rows || `<p class="empty">Nothing open. 🎉</p>`}</div>
+      <p class="page-lead">From the notes of every meeting. Tick one off here or in the meeting, it's the same item.</p>
+      <div class="actions-list">${rows || `<p class="empty">Nothing open. Action items from your meetings show up here.</p>`}</div>
     </section>`;
   $("#show-done").onchange = (e) => { sessionStorage.setItem("nt-done", e.target.checked ? "1" : "0"); showActions(); };
   bindActionRows($("#main"), showActions);
@@ -229,8 +334,8 @@ async function showActions() {
 function actionRow(a, mid, handed = {}) {
   const h = handed[a.id];
   const aiBtn = STATE.uno_work && !a.done
-    ? (h ? `<span class="handed" title="A chat in Uno Work is working on it">In Uno Work ✓</span>`
-      : `<button class="link small ai-btn" data-ai="${a.id}" data-mid="${mid}" title="Start a chat in Uno Work that prepares this (drafts, documents). It asks you before changing anything.">Ask Uno to do it</button>`)
+    ? (h ? `<span class="handed" title="A chat in Uno Work is working on it">${ic("check")} In Uno Work</span>`
+      : `<button class="ai-btn" data-ai="${a.id}" data-mid="${mid}" title="Start a chat in Uno Work that prepares this (drafts, documents). It asks you before changing anything.">${ic("sparkle")} Ask Uno to do it</button>`)
     : "";
   return `<div class="action ${a.done ? "done" : ""}">
     <label><input type="checkbox" data-toggle="${a.id}" data-mid="${mid}" ${a.done ? "checked" : ""}>
@@ -249,9 +354,9 @@ function bindActionRows(root, refresh) {
     b.disabled = true; b.textContent = "Starting…";
     try {
       await api(`/api/meetings/${b.dataset.mid}/actions/${b.dataset.ai}/ai`, { method: "POST" });
-      b.outerHTML = `<span class="handed">In Uno Work ✓</span>`;
+      b.outerHTML = `<span class="handed">${ic("check")} In Uno Work</span>`;
       toast("A chat started in Uno Work — it asks you before it changes anything.");
-    } catch (err) { toast(err.message, "bad"); b.disabled = false; b.textContent = "Ask Uno to do it"; }
+    } catch (err) { toast(err.message, "bad"); b.disabled = false; b.innerHTML = `${ic("sparkle")} Ask Uno to do it`; }
   });
 }
 
@@ -296,20 +401,21 @@ const framed = () => { try { return window.parent !== window; } catch { return t
 let unoWatch = null;   // after "Connect": re-check every few seconds for ~2 minutes
 let unoHint = {};      // provider → the "open Uno Work" hint when not in Uno Work's frame
 
+const CAL_IC = { gmail: "google", microsoft: "microsoft" };
 function unoRows(u) {
   const off = !u.enabled && !u.assistant;
   return u.calendars.map((c) => {
     let state, btn = "";
-    if (off) state = `<span class="muted">Off</span>`;
-    else if (c.state === "connected") state = `<span class="ok">Connected</span>${c.account ? ` <span class="muted">· ${esc(c.account)}</span>` : ""}${c.fetched_at ? ` <span class="muted">· ${plural(c.events, "event")} this week</span>` : ""}`;
-    else if (c.state === "not_connected") { state = `<span class="muted">Not connected</span>`; btn = "Connect"; }
+    if (off) state = "Off";
+    else if (c.state === "connected") state = `<span class="ok">Connected</span>${c.account ? ` · ${esc(c.account)}` : ""}${c.fetched_at ? ` · ${plural(c.events, "event")} this week` : ""}`;
+    else if (c.state === "not_connected") { state = "Not connected"; btn = "Connect"; }
     else if (c.state === "reconnect") { state = `<span class="bad">Sign in again</span>`; btn = "Sign in again"; }
-    else if (c.state === "unavailable") state = `<span class="muted">${c.error ? esc(c.error) : "Not available yet"}</span>`;
+    else if (c.state === "unavailable") state = c.error ? esc(c.error) : "Not available yet";
     else state = `<span class="bad">${esc(c.error || "Couldn't read it")}</span>`;
     const waiting = unoWatch && unoWatch.provider === c.provider;
-    return `<li class="ucal ${off ? "off" : ""}"><span class="ucal-name"><b>${esc(c.name)}</b><br><span class="small">${state}</span>
-        ${unoHint[c.provider] ? `<br><span class="fine">${unoHint[c.provider]}</span>` : ""}</span>
-      ${btn ? `<button type="button" class="btn small-btn" data-uno-connect="${c.provider}" ${waiting ? "disabled" : ""}>${waiting ? "Waiting…" : btn}</button>` : ""}</li>`;
+    return `<li class="ucal ${off ? "off" : ""}"><span class="cal-ic ${CAL_IC[c.provider] || ""}">${ic("calendar")}</span><span class="ucal-name"><b>${esc(c.name)}</b><span class="cal-sub">${state}</span>
+        ${unoHint[c.provider] ? `<span class="fine">${unoHint[c.provider]}</span>` : ""}</span>
+      ${btn ? `<button type="button" class="btn sm ${c.state === "not_connected" ? "primary" : ""}" data-uno-connect="${c.provider}" ${waiting ? "disabled" : ""}>${waiting ? "Waiting…" : btn}</button>` : ""}</li>`;
   }).join("");
 }
 
@@ -318,18 +424,18 @@ function unoBlock(u, withSwitch) {
   if (!u || !u.work) return "";
   const head = `<p class="sub">From your Uno account</p>`;
   if (u.supported === false) {
-    return `${head}<p class="fine">Google Calendar and Outlook &amp; Teams from your Uno account need a newer Uno Work. Until then, add your calendar by its iCal link below.</p>`;
+    return `${head}<p class="fine">Google Calendar and Outlook &amp; Teams from your Uno account need a newer Uno Work. Until then, add your calendar by its link below.</p>`;
   }
-  const sw = withSwitch ? `<label class="check"><input type="checkbox" name="uno_calendars" ${STATE.settings.uno_calendars !== false ? "checked" : ""}> <span><b>Use calendars from my Uno account</b> <span class="muted">— the ones you connected in Uno Work. Nothing to paste.</span></span></label>` : "";
-  const asst = u.assistant ? `<p class="fine">Your assistant in Uno Work uses these calendars to join your calls — turn that off in Uno Work → the assistant → Join my calls.</p>` : "";
-  const off = !withSwitch && !u.enabled && !u.assistant ? `<p class="fine">Turned off in Settings → Calendars.</p>` : "";
+  const sw = withSwitch ? `<label class="check"><input type="checkbox" name="uno_calendars" ${STATE.settings.uno_calendars !== false ? "checked" : ""}> <span><b>Use calendars from my Uno account</b><br><span class="muted small">The ones you connected in Uno Work. Nothing to paste.</span></span></label>` : "";
+  const asst = u.assistant ? `<p class="fine" style="margin-top:8px">Your assistant in Uno Work uses these calendars to join your calls. Turn that off in Uno Work → the assistant → Join my calls.</p>` : "";
+  const off = !withSwitch && !u.enabled && !u.assistant ? `<p class="fine" style="margin-top:8px">Turned off in Settings → Calendars.</p>` : "";
   return `${head}${sw}<ul class="cals ucals">${unoRows(u)}</ul>${asst}${off}`;
 }
 
 function icalList(cals) {
   const own = cals.filter((c) => c.kind !== "uno");
-  return own.length ? `<ul class="cals">${own.map((c) => `<li><b>${esc(c.name || "Calendar")}</b> <span class="muted">${esc(c.where)} · ${c.error ? `<span class="bad">${esc(c.error)}</span>` : `${plural(c.events, "event")} this week`}</span>
-    <button type="button" class="link danger small" data-cal-del="${c.id}">Remove</button></li>`).join("")}</ul>` : "";
+  return own.length ? `<ul class="cals">${own.map((c) => `<li><span class="cal-ic">${ic("link")}</span><span class="cal-name"><b>${esc(c.name || "Calendar")}</b><span class="cal-sub">${esc(c.where)} · ${c.error ? `<span class="bad">${esc(c.error)}</span>` : `${plural(c.events, "event")} this week`}</span></span>
+    <button type="button" class="icon-btn" data-cal-del="${c.id}" title="Remove" aria-label="Remove ${esc(c.name || "calendar")}">${ic("trash")}</button></li>`).join("")}</ul>` : "";
 }
 
 function connectUno(provider, rerender) {
@@ -422,74 +528,62 @@ async function renderCalls() {
   catch (e) { $("#main").innerHTML = `<section class="page"><h1>Calls</h1><p class="bad">${esc(e.message)}</p></section>`; return; }
   if (view !== "calls") return;
   const w = d.worker;
+  const asst = STATE.assistant && STATE.assistant.active ? STATE.assistant : null;
+  const botName = (asst && asst.bot_name) || STATE.settings.bot_name || "Uno Notetaker";
   const bot = w.online
-    ? `<p class="bot-line"><span class="dot-ok"></span> Bot ready${w.running ? ` · in ${plural(w.running, "call")} now` : ""}</p>`
-    : `<p class="bot-line bad"><span class="dot-bad"></span> The bot isn't running — start the <code>bot</code> service (<code>docker compose up -d</code>). Calls wait for it.</p>`;
+    ? `<p class="bot-line"><span class="dot-ok"></span> Ready to join as “${esc(botName)}”${w.running ? ` · in ${plural(w.running, "call")} now` : ""}</p>`
+    : `<p class="bot-line"><span class="dot-bad"></span> Can't join calls right now: the call service isn't running on this computer. Calls wait for it.</p>`;
   const active = d.active.map((x) => `
     <div class="call-card ${x.status}">
+      <span class="rec-dot" style="${x.status === "recording" ? "" : "animation:none;background:var(--faint);box-shadow:none"}"></span>
       <div class="cc-main"><b>${esc(x.title || "Call")}</b> ${platformTag(x.platform)}
-        <div><span class="st st-${x.status}">${esc(CALL_STATUS[x.status] || x.status)}</span> <span class="muted">· ${esc(x.detail || "")}</span></div></div>
-      <div class="cc-btns">${x.meeting_id ? `<a class="btn" href="#/m/${x.meeting_id}">Open</a>` : ""}
-        <button class="btn" data-stop="${x.id}">${x.status === "queued" ? "Cancel" : "Remove the bot"}</button></div>
+        <div class="ev-sub"><span class="st st-${x.status}">${esc(CALL_STATUS[x.status] || x.status)}</span>${x.detail ? `<span>· ${esc(x.detail)}</span>` : ""}</div></div>
+      <div class="cc-btns">${x.meeting_id ? `<a class="btn sm" href="#/m/${x.meeting_id}">Open</a>` : ""}
+        <button class="btn sm" data-stop="${x.id}">${x.status === "queued" ? "Cancel" : "Remove it"}</button></div>
     </div>`).join("");
-  let lastDay = "";
-  const upcoming = d.upcoming.filter((e) => e.url).map((e) => {
-    const day = new Date(e.start).toDateString();
-    const head = day !== lastDay ? `<div class="day">${dayLabel(e.start)}</div>` : "";
-    lastDay = day;
-    const s = e.session;
-    const state = s ? `<span class="st st-${s.status}">${esc(CALL_STATUS[s.status] || s.status)}</span>${s.meeting_id ? ` <a href="#/m/${s.meeting_id}">notes →</a>` : ""}`
-      : (e.join ? "" : `<span class="muted">${esc(e.why)}</span>`);
-    const past = new Date(e.end) < new Date();
-    return `${head}<div class="ev ${e.join ? "" : "off"} ${past ? "past" : ""}">
-      <span class="ev-time">${fmtTime(e.start)}<span class="ev-end">–${fmtTime(e.end)}</span></span>
-      <span class="ev-title">${esc(e.title || "Busy")} ${platformTag(e.platform)}${e.attendees ? ` <span class="muted small">· ${plural(e.attendees, "guest")}</span>` : ""}<br>${state}</span>
-      <label class="switch" title="${e.join ? "The bot will join" : "The bot won't join"}"><input type="checkbox" data-ev="${e.key}" ${e.join ? "checked" : ""} ${past || s ? "disabled" : ""}><i></i></label>
-    </div>`;
-  }).join("");
+  const upcoming = d.upcoming.filter((e) => e.url);
   const noLink = d.upcoming.filter((e) => !e.url && new Date(e.end) > new Date()).length;
   const uno = unoBlock(d.uno, false);
   const ical = icalList(d.calendars);
-  // An assistant in Uno Work sends this Notetaker to the person's calls ("Join my calls").
-  const asst = STATE.assistant && STATE.assistant.active ? STATE.assistant : null;
   const recent = d.recent.map((x) => `<div class="ev past">
-      <span class="ev-time">${fmtDate(new Date(x.created_at * 1000).toISOString()).replace(/^Today, /, "")}</span>
-      <span class="ev-title">${esc(x.title || "Call")} ${platformTag(x.platform)}<br><span class="st st-${x.status}">${esc(CALL_STATUS[x.status] || x.status)}</span> <span class="muted">· ${esc(x.detail || "")}</span>
-        ${x.meeting_id ? ` <a href="#/m/${x.meeting_id}">notes →</a>` : ""}${x.screenshot ? ` <a href="/api/calls/sessions/${x.id}/screenshot" target="_blank" rel="noopener">what the bot saw</a>` : ""}</span>
+      <span class="ev-time">${fmtTime(new Date(x.created_at * 1000).toISOString())}<span class="ev-end">${esc(dayLabel(new Date(x.created_at * 1000).toISOString()))}</span></span>
+      <span class="ev-title"><span class="ev-name">${esc(x.title || "Call")}</span><span class="ev-sub">${platformTag(x.platform)}<span>·</span><span class="st st-${x.status}">${esc(CALL_STATUS[x.status] || x.status)}</span>${x.detail ? `<span>· ${esc(x.detail)}</span>` : ""}
+        ${x.screenshot ? `<a href="/api/calls/sessions/${x.id}/screenshot" target="_blank" rel="noopener">What it saw</a>` : ""}</span></span>
+      ${x.meeting_id ? `<a class="btn sm" href="#/m/${x.meeting_id}">Notes</a>` : "<span></span>"}
     </div>`).join("");
-  const mode = asst ? "joins meetings you're in with someone else (set by your assistant)"
-    : { all: "joins every call with a link", accepted: "joins calls you accepted or organize", off: "joins only when you send it" }[STATE.settings.bot_auto_join] || "";
   $("#main").innerHTML = `
     <section class="page calls">
+      <a href="#/" class="back only-phone">${ic("back")} Meetings</a>
       <header class="page-head">
-        <a href="#/" class="back only-phone">‹ Meetings</a>
         <h1>Calls</h1>
-        <button class="btn primary" id="btn-send-bot">Send the bot to a call</button>
+        <button class="btn primary" id="btn-send-bot">${ic("bot")} Send to a call</button>
       </header>
       ${bot}
-      ${asst ? `<p class="fine">Your assistant <b>${esc(asst.assistant || "")}</b> in Uno Work sends this notetaker to your calls as “${esc(asst.bot_name)}”. The notes go to it, your Inbox and Telegram. Turn it off in Uno Work → the assistant → Join my calls.</p>` : ""}
-      ${active ? `<h3>Now</h3>${active}` : ""}
-      <h3>Coming up ${d.calendars.length ? `<span class="muted small">· the bot ${esc(mode)} · <button class="link small" id="calls-settings">change</button></span>` : ""}</h3>
-      ${d.calendars.length ? (upcoming || `<p class="muted">No calls with a link in the next 7 days.</p>`) + (noLink ? `<p class="fine">${plural(noLink, "event")} without a call link — the bot has nowhere to go.</p>` : "")
-        : `<div class="empty-cal cal-box"><p>Connect your calendar and the bot joins your calls by itself — Google Meet, Zoom, Teams, Yandex Telemost, Zoho Meeting. Or send it to a call by link.</p>
-          ${uno}${uno ? `<p class="sub">Other calendars (iCal link)</p>` : ""}<button class="btn ${uno ? "" : "primary"}" id="btn-cal-first">Add a calendar by its iCal link</button></div>`}
-      ${d.calendars.length ? `<h3>Calendars</h3><div class="cal-box">${uno}${uno && ical ? `<p class="sub">Other calendars (iCal link)</p>` : ""}${ical}</div>
-        <div class="row-btns"><button class="btn" id="btn-cal-add">Add an iCal link</button><button class="link" id="btn-cal-refresh">Check now</button></div>` : ""}
-      ${recent ? `<h3>Recent</h3>${recent}` : ""}
-      <p class="fine">The bot joins as a guest named “${esc((asst && asst.bot_name) || STATE.settings.bot_name || "Uno Notetaker")}”, so the host may have to let it in. It leaves when the call ends, when everyone else has left or after a long silence. KakaoTalk group calls have no link to open in a browser — the bot can't join those.</p>
+      ${asst ? `<p class="fine">Your assistant <b>${esc(asst.assistant || "")}</b> in Uno Work sends this notetaker to your calls. The notes go to it, your Inbox and Telegram. Turn it off in Uno Work → the assistant → Join my calls.</p>` : ""}
+      ${active ? `<div class="sec"><div class="sec-head"><h2>Now</h2></div><div class="panel">${active}</div></div>` : ""}
+      <div class="sec">
+        <div class="sec-head"><h2>Coming up</h2>${d.calendars.length ? `<span class="aside">${esc(joinRule(d))} · <button class="link small" id="calls-settings">Change</button></span>` : ""}</div>
+        ${d.calendars.length ? (upcoming.length ? `<div class="panel">${eventRows(upcoming)}</div>` : `<div class="panel"><div class="row muted">${ic("calendar")} No calls with a link in the next 7 days.</div></div>`)
+          + (noLink ? `<p class="fine" style="margin-top:8px">${plural(noLink, "event")} without a call link — nowhere to join.</p>` : "")
+          : connectPanel(d.uno)}
+      </div>
+      ${d.calendars.length || uno ? `<div class="sec"><div class="sec-head"><h2>Calendars</h2><span class="aside"><button class="link small" id="btn-cal-refresh">${ic("refresh")} Check now</button></span></div>
+        <div class="cal-box">${uno}${ical ? `<p class="sub">By link</p>${ical}` : ""}</div>
+        <div class="row-btns"><button class="btn sm" id="btn-cal-add">${ic("plus")} Add a calendar by link</button></div></div>` : ""}
+      ${recent ? `<div class="sec"><div class="sec-head"><h2>Recent</h2></div><div class="panel">${recent}</div></div>` : ""}
+      <p class="fine" style="margin-top:28px">It joins as a guest, so the host may have to let it in. It leaves when the call ends, when everyone else has left or after a long silence. KakaoTalk group calls have no link to open in a browser, so it can't join those.</p>
     </section>`;
   $("#btn-send-bot").onclick = openBotDialog;
-  for (const id of ["#btn-cal-first", "#btn-cal-add"]) if ($(id)) $(id).onclick = () => { $("#cal-url").value = ""; $("#dlg-calendar").showModal(); };
-  if ($("#calls-settings")) $("#calls-settings").onclick = openSettings;
-  if ($("#btn-cal-refresh")) $("#btn-cal-refresh").onclick = async (e) => { e.target.disabled = true; try { await api("/api/calendars/refresh", { method: "POST" }); } catch (err) { toast(err.message, "bad"); } renderCalls(); };
+  for (const id of ["#btn-cal-add", "#home-cal-link"]) if ($(id)) $(id).onclick = openCalendarDialog;
+  if ($("#home-send-bot")) $("#home-send-bot").onclick = openBotDialog;
+  if ($("#calls-settings")) $("#calls-settings").onclick = () => openSettings("set-bot");
+  if ($("#btn-cal-refresh")) $("#btn-cal-refresh").onclick = async (e) => { e.currentTarget.disabled = true; try { await api("/api/calendars/refresh", { method: "POST" }); } catch (err) { toast(err.message, "bad"); } renderCalls(); };
   $$("[data-stop]").forEach((b) => b.onclick = async () => { b.disabled = true; try { await api(`/api/calls/sessions/${b.dataset.stop}/stop`, { method: "POST" }); } catch (e) { toast(e.message, "bad"); } renderCalls(); });
   bindCalendarRows($("#main"), () => { if (view === "calls") renderCalls(); });
-  $$("[data-ev]").forEach((cb) => cb.onchange = async () => {
-    try { await api(`/api/calls/events/${cb.dataset.ev}`, { method: "PUT", body: JSON.stringify({ choice: cb.checked ? "join" : "skip" }) }); }
-    catch (e) { toast(e.message, "bad"); }
-    renderCalls();
-  });
+  bindEventSwitches($("#main"), renderCalls);
 }
+
+function openCalendarDialog() { $("#cal-url").value = ""; $("#dlg-calendar").showModal(); }
 
 function openBotDialog() {
   $("#bot-name-hint").textContent = STATE.settings.bot_name || "Uno Notetaker";
@@ -529,13 +623,13 @@ async function refreshBot() {
 
 const canShareTab = () => !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !phone();
 
-function openRecordDialog() {
+function openRecordDialog(mode) {
   if (recording) { location.hash = `#/m/${recording.id}`; return; }
   const dlg = $("#dlg-record");
   dlg.querySelector("form").reset();
   const tab = canShareTab();
   $(".mode-call", dlg).hidden = !tab;
-  dlg.querySelector(`[name="mode"][value="${tab ? "call" : "mic"}"]`).checked = true;
+  dlg.querySelector(`[name="mode"][value="${tab && mode !== "mic" ? "call" : "mic"}"]`).checked = true;
   $("#rec-template").value = STATE.settings.template;
   dlg.querySelector('[name="language"]').value = STATE.settings.language;
   dlg.showModal();
@@ -662,7 +756,7 @@ function recordingPanel() {
       </div>
       <p class="muted">${phone() ? "Keep this screen open — a locked phone stops recording." : "Keep this tab open."} Audio is saved to your computer every few seconds.</p>
       <p class="warn" id="rec-net" hidden>Connection lost — the recording continues and will catch up.</p>
-      <button class="btn danger big" id="rec-stop">■ Stop and make notes</button>
+      <button class="btn danger big" id="rec-stop">Stop and make notes</button>
     </section>`;
 }
 function tickRecording() {
@@ -685,7 +779,6 @@ function tickRecording() {
 
 let pendingFile = null;
 const pickFile = () => $("#file-input").click();
-$("#btn-upload").onclick = pickFile;
 $("#btn-upload-phone").onclick = pickFile;
 $("#file-input").onchange = (e) => {
   const f = e.target.files[0];
@@ -768,7 +861,7 @@ async function renderMeeting(first = false) {
   const id = current;
   let m;
   try { m = await api(`/api/meetings/${id}`); }
-  catch (e) { $("#main").innerHTML = `<section class="home"><a href="#/" class="back">‹ Meetings</a><h1>Not found</h1><p>${esc(e.message)}</p></section>`; return; }
+  catch (e) { $("#main").innerHTML = `<section class="page"><a href="#/" class="back">${ic("back")} Meetings</a><h1>This meeting isn't here</h1><p class="muted">${esc(e.message)}</p></section>`; return; }
   if (id !== current) return;
   lastMeeting = m;
   const busy = BUSY.includes(m.status);
@@ -777,48 +870,57 @@ async function renderMeeting(first = false) {
     const p = $("#progress-text"); if (p) p.textContent = m.progress || m.status;
     return;
   }
-  const src = { browser: "recorded in the browser", upload: "uploaded", telegram: "from Telegram",
-    screen: "screen recording from Uno Work",
-    bot: `the bot in ${PLATFORM[(m.call || {}).platform] || "the call"}` }[m.source] || m.source;
+  const src = { browser: "Recorded in the browser", upload: "Uploaded", telegram: "From Telegram",
+    screen: "Screen recording",
+    bot: `Notetaker in ${PLATFORM[(m.call || {}).platform] || "the call"}` }[m.source] || m.source;
   const botLive = m.source === "bot" && m.status === "recording";
-  const open = (m.actions || []).filter((a) => !a.done).length;
+  const tt = (m.talk_time || []).filter((x) => x.speaker);
+  spkOrder = tt.map((x) => x.speaker);
+  const faces = tt.length ? `<span class="faces" title="${esc(tt.map((x) => x.speaker === "Me" ? "You" : x.speaker).join(", "))}">${tt.slice(0, 4).map((x) => face(x.speaker)).join("")}${tt.length > 4 ? `<span class="more-faces">+${tt.length - 4}</span>` : ""}</span>` : "";
+  const ready = m.segments.length > 0;
+  const tabBtn = (k, icon, label) => `<button data-tab="${k}" role="tab" aria-controls="tab-body" aria-selected="${tab === k}" class="${tab === k ? "on" : ""}">${ic(icon)} ${label}</button>`;
   $("#main").innerHTML = `
+    <div class="topbar">
+      <a href="#/" class="icon-btn only-phone" aria-label="Meetings">${ic("back")}</a>
+      <span class="crumb">${esc(m.title || "Untitled meeting")}</span>
+      <span class="grow"></span>
+      ${ready ? `<button class="btn ghost sm" id="btn-share">${ic("link")} ${m.share && m.share.token ? "Shared" : "Share"}</button>
+      <div class="menu-wrap">
+        <button class="icon-btn" id="btn-more" aria-label="More" title="More" aria-expanded="false">${ic("more")}</button>
+        <div class="menu" id="menu" role="menu" hidden>
+          <button data-act="copy-text">${ic("copy")} Copy notes</button>
+          <a href="/api/meetings/${id}/export?what=notes" download>${ic("download")} Download notes</a>
+          <a href="/api/meetings/${id}/export?what=all" download>${ic("download")} Download notes and transcript</a>
+          ${STATE.inbox ? `<button data-act="send-inbox">${ic("inbox")} Send to Uno Work Inbox</button>` : ""}
+          ${STATE.telegram.paired ? `<button data-act="send-telegram">${ic("send")} Send to Telegram</button>` : ""}
+          <hr>
+          <button data-act="delete" class="danger">${ic("trash")} Delete meeting…</button>
+        </div>
+      </div>` : ""}
+    </div>
     <article class="meeting">
-      <a href="#/" class="back only-phone">‹ Meetings</a>
       <header class="m-head">
         <input class="m-title" id="m-title" value="${esc(m.title)}" placeholder="${busy || live ? "New meeting" : "Untitled meeting"}" aria-label="Title">
-        <div class="m-meta">${fmtDate(m.created_at)}${m.duration ? ` · ${fmtTs(m.duration)}` : ""} · ${src}${m.segments.length && open ? ` · <b>${plural(open, "action item")}</b>` : ""}</div>
+        <div class="m-meta">
+          <span>${ic("calendar")} ${esc(fmtDate(m.created_at))}</span>
+          ${m.duration ? `<span>${ic("clock")} ${fmtDur(m.duration)}</span>` : ""}
+          <span>${ic(SOURCE_ICON[m.source] || "notes")} ${esc(src)}</span>
+          ${faces}
+        </div>
       </header>
       ${live ? recordingPanel() : ""}
-      ${botLive ? `<section class="rec-panel bot-panel"><span class="rec-dot"></span><div><b>The bot is in the call, recording.</b><p class="muted">Notes come when the call ends — or remove the bot to end the recording now.</p></div>
-        <button class="btn" id="bot-remove">Remove the bot</button></section>` : ""}
-      ${m.status === "uploading" && !live ? `<section class="progress"><p id="up-pct">Uploading…</p><div class="bar"><i id="up-progress"></i></div></section>` : ""}
+      ${botLive ? `<section class="rec-panel bot-panel"><span class="rec-dot"></span><div><b>Notetaker is in the call and recording</b><p class="muted">Notes arrive when the call ends. Remove it to end the recording now.</p></div>
+        <button class="btn" id="bot-remove">Remove it</button></section>` : ""}
+      ${m.status === "uploading" && !live ? `<section class="progress upl"><p id="up-pct">Uploading…</p><div class="bar"><i id="up-progress"></i></div></section>` : ""}
       ${busy && m.status !== "uploading" ? `<section class="progress"><div class="spinner"></div><div><p id="progress-text">${esc(m.progress || "Working…")}</p>${progressSteps(m)}</div></section>` : ""}
-      ${m.status === "error" ? `<section class="error-box"><b>Something went wrong.</b> <span>${esc(m.error)}</span> <button class="btn" id="btn-retry">Retry</button></section>` : ""}
-      ${m.source === "screen" ? screenPlayer(m) : m.has_audio ? `<audio controls preload="metadata" id="player" src="/api/meetings/${id}/audio"></audio>` : ""}
-      ${m.segments.length ? `
-      <nav class="tabs">
-        <button data-tab="notes" class="${tab === "notes" ? "on" : ""}">Notes</button>
-        <button data-tab="transcript" class="${tab === "transcript" ? "on" : ""}">Transcript</button>
-        <button data-tab="ask" class="${tab === "ask" ? "on" : ""}">Ask</button>
-        <span class="grow"></span>
-        <button class="link" id="btn-share">${m.share && m.share.token ? "Shared ✓" : "Share"}</button>
-        <div class="menu-wrap">
-          <button class="icon-btn" id="btn-more" aria-label="More" title="More">⋯</button>
-          <div class="menu" id="menu" hidden>
-            <a href="/api/meetings/${id}/export?what=notes" download>Download notes (.md)</a>
-            <a href="/api/meetings/${id}/export?what=all" download>Download notes + transcript</a>
-            <button data-act="copy-text">Copy notes as text</button>
-            ${STATE.inbox ? `<button data-act="send-inbox">Send to Uno Work Inbox</button>` : ""}
-            ${STATE.telegram.paired ? `<button data-act="send-telegram">Send to Telegram</button>` : ""}
-            <hr>
-            <button data-act="delete" class="danger">Delete meeting…</button>
-          </div>
-        </div>
-      </nav>
-      <div class="tab-body" id="tab-body"></div>` : ""}
-      ${!m.segments.length && !busy && !live && !botLive && m.status !== "error" ? `<p class="muted">Nothing here yet.</p>` : ""}
-    </article>`;
+      ${m.status === "error" ? `<section class="error-box">${ic("alert")}<span><b>The notes couldn't be made.</b> ${esc(m.error)}</span><button class="btn sm" id="btn-retry">Try again</button></section>` : ""}
+      ${m.source === "screen" ? screenPlayer(m) : ""}
+      ${ready ? `
+      <nav class="tabs" role="tablist">${tabBtn("notes", "notes", "Notes")}${tabBtn("transcript", "users", "Transcript")}${tabBtn("ask", "sparkle", "Ask")}</nav>
+      <div class="tab-body" id="tab-body" role="tabpanel"></div>` : ""}
+      ${!ready && !busy && !live && !botLive && m.status !== "error" ? `<p class="muted">Nothing here yet.</p>` : ""}
+    </article>
+    ${m.source !== "screen" && m.has_audio ? playerBar(id) : ""}`;
   $("#m-title").onchange = async (e) => { await api(`/api/meetings/${id}`, { method: "PUT", body: JSON.stringify({ title: e.target.value }) }); loadList(); };
   if ($("#btn-retry")) $("#btn-retry").onclick = async () => { await api(`/api/meetings/${id}/retry`, { method: "POST" }); openMeeting(id); };
   if (live) { $("#rec-stop").onclick = stopRecording; requestAnimationFrame(tickRecording); }
@@ -829,13 +931,20 @@ async function renderMeeting(first = false) {
     };
   }
   if (m.segments.length) {
-    $$(".tabs [data-tab]").forEach((b) => b.onclick = () => { tab = b.dataset.tab; renderMeeting(true); });
+    $$(".tabs [data-tab]").forEach((b) => b.onclick = () => {
+      tab = b.dataset.tab;
+      $$(".tabs [data-tab]").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-selected", String(x === b)); });
+      renderTab(m);
+    });
     $("#btn-share").onclick = () => shareDialog(m);
     bindMenu(m);
     renderTab(m);
-    bindPlayerFollow();
-    if (seekOnOpen !== null) { const at = seekOnOpen; seekOnOpen = null; setTimeout(() => focusLine(at, true), 50); }
   }
+  if ($("#player")) {
+    bindPlayerBar();
+    bindPlayerFollow();
+  }
+  if (ready && seekOnOpen !== null) { const at = seekOnOpen; seekOnOpen = null; setTimeout(() => focusLine(at, true), 50); }
   if (busy || botLive) {
     pollTimer = setInterval(async () => {
       const s = await api(`/api/meetings/${id}`).catch(() => null);
@@ -848,8 +957,13 @@ async function renderMeeting(first = false) {
 
 function bindMenu(m) {
   const menu = $("#menu");
-  $("#btn-more").onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
-  document.addEventListener("click", () => { if (menu) menu.hidden = true; }, { once: true });
+  $("#btn-more").onclick = (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    closeMenus();
+    menu.hidden = !open;
+    e.currentTarget.setAttribute("aria-expanded", String(open));
+  };
   $$("[data-act]", menu).forEach((b) => b.onclick = async () => {
     menu.hidden = true;
     const act = b.dataset.act;
@@ -912,6 +1026,63 @@ function screenPlayer(m) {
     <p class="fine screen-src">In ${where} · <a href="${esc(u)}" target="_blank" rel="noopener">Open the link</a></p>`;
 }
 
+function face(name) {
+  const label = name === "Me" ? "You" : name;
+  const ini = label === "Others" ? "…" : label.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  return `<span class="face" style="background:${spkColor(name)}" title="${esc(label)}">${esc(ini)}</span>`;
+}
+function playerBar(id) {
+  return `<audio preload="metadata" id="player" src="/api/meetings/${id}/audio"></audio>
+    <div class="player-bar" id="player-bar">
+      <button class="play" id="pb-play" aria-label="Play">${ic("play")}</button>
+      <button class="icon-btn skip" id="pb-back" aria-label="Back 15 seconds" title="Back 15 s">${ic("back15")}</button>
+      <span class="t" id="pb-now">0:00</span>
+      <input type="range" id="pb-seek" min="0" max="1000" value="0" step="1" aria-label="Position">
+      <span class="t" id="pb-dur">–:––</span>
+      <button class="icon-btn skip" id="pb-fwd" aria-label="Forward 15 seconds" title="Forward 15 s">${ic("fwd15")}</button>
+      <button class="speed" id="pb-speed" title="Playback speed">1×</button>
+    </div>`;
+}
+const SPEEDS = [1, 1.25, 1.5, 2];
+function bindPlayerBar() {
+  const p = $("#player"), bar = $("#player-bar");
+  if (!p || !bar) return;
+  const seekEl = $("#pb-seek");
+  let dragging = false;
+  const sync = () => {
+    const d = p.duration && isFinite(p.duration) ? p.duration : (lastMeeting && lastMeeting.duration) || 0;
+    $("#pb-now").textContent = fmtTs(p.currentTime || 0);
+    $("#pb-dur").textContent = d ? fmtTs(d) : "–:––";
+    if (!dragging) seekEl.value = d ? Math.round((p.currentTime / d) * 1000) : 0;
+    seekEl.style.setProperty("--p", `${seekEl.value / 10}%`);
+  };
+  const icon = () => { $("#pb-play").innerHTML = ic(p.paused ? "play" : "pause"); $("#pb-play").setAttribute("aria-label", p.paused ? "Play" : "Pause"); };
+  p.addEventListener("timeupdate", sync);
+  p.addEventListener("loadedmetadata", sync);
+  p.addEventListener("play", icon);
+  p.addEventListener("pause", icon);
+  $("#pb-play").onclick = () => (p.paused ? p.play().catch(() => {}) : p.pause());
+  $("#pb-back").onclick = () => { p.currentTime = Math.max(0, p.currentTime - 15); };
+  $("#pb-fwd").onclick = () => { p.currentTime = Math.min(p.duration || 1e9, p.currentTime + 15); };
+  seekEl.oninput = () => {
+    dragging = true;
+    seekEl.style.setProperty("--p", `${seekEl.value / 10}%`);
+    const d = p.duration && isFinite(p.duration) ? p.duration : 0;
+    if (d) $("#pb-now").textContent = fmtTs((seekEl.value / 1000) * d);
+  };
+  seekEl.onchange = () => {
+    const d = p.duration && isFinite(p.duration) ? p.duration : 0;
+    if (d) p.currentTime = (seekEl.value / 1000) * d;
+    dragging = false;
+  };
+  $("#pb-speed").onclick = (e) => {
+    const next = SPEEDS[(SPEEDS.indexOf(p.playbackRate) + 1) % SPEEDS.length] || 1;
+    p.playbackRate = next;
+    e.currentTarget.textContent = `${next}×`;
+  };
+  sync();
+}
+
 function bindPlayerFollow() {
   const p = $("#player");
   if (!p) return;
@@ -930,29 +1101,35 @@ function renderTab(m) {
     const acts = m.actions || [];
     const d = m.delivery || {};
     const sent = [d.inbox === "sent" ? "Inbox" : "", d.telegram === "sent" ? "Telegram" : ""].filter(Boolean);
+    const stt = m.usage && m.usage.stt;
+    const sttLabel = stt === "local" ? "Whisper on this computer" : stt === "local-fallback" ? "Whisper on this computer (Uno AI speech-to-text was busy)" : stt === "uno" ? "Whisper via Uno AI" : stt ? "Whisper via your provider" : "";
     body.innerHTML = `
-      ${acts.length ? `<section class="card-box">
+      ${acts.length ? `<section class="todo-block">
         <h2>Action items <span class="muted">${acts.filter((a) => !a.done).length} open</span></h2>
         ${acts.map((a) => actionRow(a, m.id, m.handed || {})).join("")}
       </section>` : ""}
-      <div class="notes md" id="notes">${m.notes ? renderMd(m.notes, { skipTitle: m.title, skipSection: acts.length ? ACTION_SECTION : null }) : `<p class="muted">Notes are not written yet.</p>`}</div>
-      <div class="notes-tools">
-        <select id="n-template" aria-label="Kind of meeting">${tpl}</select>
-        <button class="btn" id="n-regen">Rewrite notes</button>
+      <div class="notes md" id="notes">${m.notes ? renderMd(m.notes, { skipTitle: m.title, skipSection: acts.length ? ACTION_SECTION : null }) : `<p class="muted">The notes aren't written yet.</p>`}</div>
+      <div class="notes-foot">
+        <label class="rewrite">${ic("sparkle")} Rewrite as <select id="n-template" aria-label="Kind of meeting">${tpl}</select></label>
+        <button class="btn sm" id="n-regen">Rewrite</button>
         <span class="grow"></span>
-        <button class="link" id="n-copy">Copy Markdown</button>
-        <button class="link" id="n-edit">Edit</button>
+        <button class="btn ghost sm" id="n-edit">${ic("edit")} Edit</button>
+        <button class="btn ghost sm" id="n-copy">${ic("copy")} Copy</button>
       </div>
-      <p class="fine">${sent.length ? `Sent to ${sent.join(" and ")} ✓ · ` : ""}${m.usage && m.usage.model ? `Notes by ${esc(m.usage.model)} · transcript: ${esc(m.usage.stt === "local" ? "Whisper on this computer" : m.usage.stt === "local-fallback" ? "Whisper on this computer (Uno AI speech-to-text was not available)" : "Whisper via " + (m.usage.stt === "uno" ? "Uno AI" : "your provider"))} · ` : ""}<span title="Folder on this computer">${esc(m.path)}</span></p>`;
+      <p class="provenance">
+        ${sent.length ? `<span>${ic("check")} Sent to ${sent.join(" and ")}</span>` : ""}
+        <span title="${esc(["Folder on this computer", m.usage && m.usage.model ? `Notes by ${m.usage.model}` : "", sttLabel ? `Transcript: ${sttLabel}` : ""].filter(Boolean).join(" · "))}">${ic("folder")} ${esc(m.path)}</span>
+      </p>`;
     bindActionRows(body, () => renderMeeting(true));
     $("#n-regen").onclick = async () => {
       await api(`/api/meetings/${m.id}/regenerate`, { method: "POST", body: JSON.stringify({ template: $("#n-template").value }) });
       openMeeting(m.id);
     };
-    $("#n-copy").onclick = () => { navigator.clipboard.writeText(m.notes); toast("Notes copied as Markdown"); };
+    $("#n-copy").onclick = () => { navigator.clipboard.writeText(m.notes); toast("Notes copied"); };
     $("#n-edit").onclick = () => {
-      $("#notes").outerHTML = `<textarea class="notes-edit" id="notes-edit">${esc(m.notes)}</textarea><div class="dlg-actions"><button class="btn" id="n-cancel">Cancel</button><button class="btn primary" id="n-save">Save</button></div>`;
-      $("#n-cancel").onclick = () => renderMeeting(true);
+      $("#notes").outerHTML = `<textarea class="notes-edit" id="notes-edit">${esc(m.notes)}</textarea><div class="row-btns"><button class="btn" id="n-cancel">Cancel</button><button class="btn primary" id="n-save">Save</button></div>`;
+      $(".notes-foot").hidden = true;
+      $("#n-cancel").onclick = () => renderTab(m);
       $("#n-save").onclick = async () => {
         await api(`/api/meetings/${m.id}`, { method: "PUT", body: JSON.stringify({ notes: $("#notes-edit").value }) });
         toast("Saved to notes.md"); renderMeeting(true); loadList();
@@ -964,8 +1141,8 @@ function renderTab(m) {
     let prev = null;
     body.innerHTML = `
       ${tt.length ? `<div class="speakers">${tt.map((x) => `<button class="spk-chip" data-spk="${esc(x.speaker)}" title="Rename">
-        <i style="background:${spkColor(x.speaker)}"></i>${esc(x.speaker === "Me" ? "You" : x.speaker)} <span>${Math.round(x.share * 100)}%</span></button>`).join("")}
-        <span class="fine">${guessed ? "Told apart by the AI from what was said — " : ""}tap a name to fix it</span></div>` : ""}
+        ${face(x.speaker)}${esc(x.speaker === "Me" ? "You" : x.speaker)} <span>${Math.round(x.share * 100)}%</span></button>`).join("")}
+        <span class="fine">${guessed ? "Told apart by the AI from what was said. " : ""}Tap a name to fix it.</span></div>` : ""}
       <div class="transcript">${m.segments.map((s) => {
         const same = s.speaker === prev; prev = s.speaker;
         return `<p class="line ${same ? "cont" : ""}" data-start="${s.start}"><a href="#" class="ts" data-ts="${fmtTs(s.start)}">${fmtTs(s.start)}</a><span class="said">${s.speaker && !same ? `<b class="spk" style="color:${spkColor(s.speaker)}">${esc(s.speaker === "Me" ? "You" : s.speaker)}</b>` : ""}${esc(s.text)}${s.screen ? `<span class="on-screen">On screen: ${esc(s.screen)}</span>` : ""}${s.did ? `<span class="on-screen did">Did: ${esc(s.did)}</span>` : ""}</span></p>`;
@@ -974,8 +1151,8 @@ function renderTab(m) {
   } else {
     const chat = m.chat || [];
     body.innerHTML = `
-      <div class="chat" id="chat">${chat.length ? chat.map(chatMsg).join("") : `<div class="suggest">${(m.source === "screen" ? ["What exactly should be fixed?", "Write it up as a bug report", "List the steps shown"] : ["What did we promise the client?", "Who owns what, by when?", "Write a follow-up email"]).map((q) => `<button class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>`}</div>
-      <form class="ask" id="ask-form"><input id="ask-q" placeholder="Ask about this meeting…" autocomplete="off" enterkeyhint="send"><button class="btn primary">Ask</button></form>`;
+      <div class="chat" id="chat">${chat.length ? chat.map(chatMsg).join("") : `<div class="suggest">${(m.source === "screen" ? ["What exactly should be fixed?", "Write it up as a bug report", "List the steps shown"] : ["What did we promise the client?", "Who owns what, by when?", "Write a follow-up email"]).map((q) => `<button class="chip" data-q="${esc(q)}">${ic("sparkle")} ${esc(q)}</button>`).join("")}</div>`}</div>
+      <form class="ask" id="ask-form"><input id="ask-q" placeholder="Ask about this meeting…" autocomplete="off" enterkeyhint="send"><button class="btn primary" aria-label="Ask">${ic("send")}</button></form>`;
     const ask = async (q) => {
       const c = $("#chat");
       if (!chat.length) c.innerHTML = "";
@@ -996,8 +1173,11 @@ function renderTab(m) {
     };
   }
 }
-const SPK_COLORS = ["#2f5bea", "#8a4bd6", "#1f8a4c", "#c2562f", "#a8327a", "#2a7f96"];
+const SPK_COLORS = [0, 1, 2, 3, 4, 5].map((i) => `var(--spk-${i})`);
+let spkOrder = [];  // speakers of the meeting on screen, by talk time: distinct colors for up to six
 function spkColor(name) {
+  const i = spkOrder.indexOf(name);
+  if (i >= 0 && spkOrder.length <= SPK_COLORS.length) return SPK_COLORS[i];
   if (name === "Me") return SPK_COLORS[0];
   if (name === "Others") return SPK_COLORS[1];
   let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
@@ -1051,7 +1231,7 @@ function shareDialog(m) {
 
 // ---- settings --------------------------------------------------------------
 
-function openSettings() {
+function openSettings(section) {
   const f = $("#settings-form");
   const s = STATE.settings;
   for (const [k, v] of Object.entries(s)) {
@@ -1064,14 +1244,14 @@ function openSettings() {
   }
   const inbox = f.querySelector('[name="notify_inbox"]');
   inbox.disabled = !STATE.inbox;
-  $("#inbox-note").textContent = STATE.inbox ? "— the bell in Uno Work: “Notes ready · 3 action items”." : "— needs Uno Work on this computer.";
+  $("#inbox-note").textContent = STATE.inbox ? "The bell in Uno Work: “Notes ready · 3 action items”." : "Needs Uno Work on this computer.";
   const p = STATE.provider;
   $("#uno-provider-note").textContent = p.name === "uno" && p.ready
     ? (p.route === "app"
       ? "Works out of the box — uses the AI of this computer. How much this app may spend is set in Uno Work → Settings → Apps."
       : `Works out of the box — using ${p.source}. Usage is billed to your Uno AI balance.`)
-    : "Works out of the box on a Uno computer — no keys. Usage is billed to your Uno AI balance.";
-  $("#ai-route").textContent = p.ready ? `Now in use: ${p.route_label} · notes model ${p.model}` : "Now in use: nothing — the AI is not set up";
+    : p.name === "uno" ? "Can't reach Uno AI from this computer. It works by itself on a Uno computer; anywhere else, choose another provider." : "Works by itself on a Uno computer, no keys. Usage is billed to your Uno AI balance.";
+  $("#ai-route").textContent = p.ready ? `Now in use: ${p.route_label} · notes model ${p.model}` : "Now in use: nothing yet";
   f.querySelector('[name="model"]').placeholder = p.route === "app" ? "default — this computer's choice" : "deepseek/deepseek-v3.2";
   $("#test-out").innerHTML = "";
   syncCustom();
@@ -1079,11 +1259,33 @@ function openSettings() {
   calBoxData = null;
   $("#cal-box").innerHTML = `<p class="muted">Loading…</p>`;
   renderCalendarBox();
+  $("#adv-more").open = section === "set-adv";
   $("#dlg-settings").showModal();
+  $("#set-body").scrollTop = 0;
+  if (section && section !== "set-cal") requestAnimationFrame(() => setSection(section, true));
+  else markSection("set-cal");
 }
+function markSection(id) { $$("#set-nav a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === `#${id}`)); }
+function setSection(id, instant) {
+  if (id === "set-adv") $("#adv-more").open = true;
+  const body = $("#set-body"), el = $(`#${id}`);
+  body.scrollTo({ top: el.offsetTop - body.offsetTop - 4, behavior: instant ? "instant" : "smooth" });
+  markSection(id);
+}
+$$("#set-nav a").forEach((a) => a.onclick = (e) => { e.preventDefault(); setSection(a.getAttribute("href").slice(1)); });
+$("#set-body").addEventListener("scroll", () => {
+  const body = $("#set-body");
+  if (body.scrollTop + body.clientHeight >= body.scrollHeight - 4) { markSection("set-adv"); return; }
+  let cur = "set-cal";
+  for (const sec of $$(".set-sec", body)) if (sec.offsetTop - body.offsetTop - 40 <= body.scrollTop) cur = sec.id;
+  markSection(cur);
+}, { passive: true });
 function syncCustom() {
   const f = $("#settings-form");
   f.querySelector(".custom-fields").hidden = f.querySelector('[name="provider"]:checked')?.value !== "custom";
+  const local = f.querySelector('[name="stt"]:checked')?.value === "local";
+  f.querySelector(".stt-local").hidden = !local;
+  f.querySelector(".stt-provider").hidden = local;
 }
 
 let tgPoll = null;
@@ -1118,8 +1320,7 @@ async function connectTelegram(token) {
 }
 
 $("#settings-form").addEventListener("change", syncCustom);
-$("#btn-settings").onclick = openSettings;
-$("#btn-settings-top").onclick = openSettings;
+$("#btn-settings").onclick = () => openSettings();
 async function saveSettings() {
   const f = $("#settings-form");
   const body = Object.fromEntries(new FormData(f).entries());
@@ -1140,15 +1341,39 @@ $("#btn-test").onclick = async () => {
   try {
     await saveSettings();
     const r = await api("/api/settings/test", { method: "POST" });
-    const line = (label, x) => `<p class="${x.ok ? "ok" : "bad"}">${x.ok ? "✓" : "✗"} ${label}: ${esc(x.detail)}</p>`;
+    const line = (label, x) => `<p class="${x.ok ? "ok" : "bad"}">${ic(x.ok ? "check" : "x")} ${label}: ${esc(x.detail)}</p>`;
     out.innerHTML = line("Notes model", r.notes) + line("Speech-to-text", r.stt);
   } catch (e) { out.innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
 };
 
 // ---- routing ---------------------------------------------------------------
 
-$("#btn-record").onclick = openRecordDialog;
-$("#btn-record-phone").onclick = openRecordDialog;
+$("#btn-record-phone").onclick = () => openRecordDialog();
+function newAction(kind) {
+  if (kind === "bot") openBotDialog();
+  else if (kind === "upload") pickFile();
+  else openRecordDialog(kind);
+}
+function bindNew(root) {
+  $$("[data-new]", root).forEach((b) => b.onclick = (e) => { e.stopPropagation(); closeMenus(); newAction(b.dataset.new); });
+}
+function closeMenus() {
+  $$(".menu").forEach((m) => { m.hidden = true; });
+  $$("[aria-expanded=true]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+$("#btn-new").onclick = (e) => {
+  e.stopPropagation();
+  const m = $("#new-menu"), open = m.hidden;
+  closeMenus();
+  if (recording) { openRecordDialog(); return; }
+  m.hidden = !open;
+  $("#btn-new").setAttribute("aria-expanded", String(open));
+  if (open) m.querySelector("button").focus();
+};
+bindNew($(".side"));
+document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) closeMenus(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+$("#main").addEventListener("scroll", () => $("#main").classList.toggle("scrolled", $("#main").scrollTop > 4), { passive: true });
 let searchTimer;
 $("#search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadList, 200); };
 
