@@ -220,7 +220,7 @@ async function renderComingUp() {
     body = `<div class="panel">${eventRows(calls, { compact: true })}</div>`;
   }
   const off = anyCal && !d.worker.online ? `<p class="fine" style="margin-top:8px">${ic("alert")} The notetaker can't join calls right now: its call service isn't running on this computer.</p>` : "";
-  box.innerHTML = `<div class="sec-head"><h2>Coming up</h2>${anyCal ? `<span class="aside">${esc(joinRule(d))} · <a href="#/calls">All calls</a></span>` : ""}</div>${body}${off}`;
+  box.innerHTML = `<div class="sec-head"><h2>Coming up</h2>${anyCal ? `<span class="aside">${esc(joinRule(d))} · <a href="#/calls">All calls</a> · <a href="#/calendars">Calendars</a></span>` : ""}</div>${body}${off}`;
   bindEventSwitches(box, renderComingUp);
   bindCalendarRows(box, () => renderComingUp());
   if ($("#home-cal-link", box)) $("#home-cal-link", box).onclick = openCalendarDialog;
@@ -401,35 +401,37 @@ const framed = () => { try { return window.parent !== window; } catch { return t
 let unoWatch = null;   // after "Connect": re-check every few seconds for ~2 minutes
 let unoHint = {};      // provider → the "open Uno Work" hint when not in Uno Work's frame
 
-const CAL_IC = { gmail: "google", microsoft: "microsoft" };
+const CAL_LOGO = {
+  gmail: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"/></svg>`,
+  microsoft: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#F25022" d="M1 1h10.5v10.5H1z"/><path fill="#7FBA00" d="M12.5 1H23v10.5H12.5z"/><path fill="#00A4EF" d="M1 12.5h10.5V23H1z"/><path fill="#FFB900" d="M12.5 12.5H23V23H12.5z"/></svg>`,
+};
 function unoRows(u) {
   const off = !u.enabled && !u.assistant;
   return u.calendars.map((c) => {
-    let state, btn = "";
+    let state, btn = "", byLink = false;
     if (off) state = "Off";
     else if (c.state === "connected") state = `<span class="ok">Connected</span>${c.account ? ` · ${esc(c.account)}` : ""}${c.fetched_at ? ` · ${plural(c.events, "event")} this week` : ""}`;
     else if (c.state === "not_connected") { state = "Not connected"; btn = "Connect"; }
     else if (c.state === "reconnect") { state = `<span class="bad">Sign in again</span>`; btn = "Sign in again"; }
-    else if (c.state === "unavailable") state = c.error ? esc(c.error) : "Not available yet";
+    else if (c.state === "unavailable") { state = "Add it by link for now"; byLink = true; }
     else state = `<span class="bad">${esc(c.error || "Couldn't read it")}</span>`;
     const waiting = unoWatch && unoWatch.provider === c.provider;
-    return `<li class="ucal ${off ? "off" : ""}"><span class="cal-ic ${CAL_IC[c.provider] || ""}">${ic("calendar")}</span><span class="ucal-name"><b>${esc(c.name)}</b><span class="cal-sub">${state}</span>
+    return `<li class="ucal ${off ? "off" : ""}"><span class="cal-ic">${CAL_LOGO[c.provider] || ic("calendar")}</span><span class="ucal-name"><b>${esc(c.name)}</b><span class="cal-sub">${state}</span>
         ${unoHint[c.provider] ? `<span class="fine">${unoHint[c.provider]}</span>` : ""}</span>
-      ${btn ? `<button type="button" class="btn sm ${c.state === "not_connected" ? "primary" : ""}" data-uno-connect="${c.provider}" ${waiting ? "disabled" : ""}>${waiting ? "Waiting…" : btn}</button>` : ""}</li>`;
+      ${btn ? `<button type="button" class="btn ${c.state === "not_connected" ? "primary" : ""}" data-uno-connect="${c.provider}" ${waiting ? "disabled" : ""}>${waiting ? "Waiting…" : btn}</button>` : ""}${byLink ? `<button type="button" class="btn" data-cal-add>${ic("link")} Add by link</button>` : ""}</li>`;
   }).join("");
 }
 
-// The "From your Uno account" block. withSwitch: the setting (inside the Settings form).
+// Google and Outlook from the Uno account. withSwitch: the setting (inside the Settings form).
 function unoBlock(u, withSwitch) {
-  if (!u || !u.work) return "";
-  const head = `<p class="sub">From your Uno account</p>`;
+  if (!u || !u.work) return `<p class="fine">Google Calendar and Outlook connect in one click inside Uno Work. Here, add your calendar by its link.</p>`;
   if (u.supported === false) {
-    return `${head}<p class="fine">Google Calendar and Outlook &amp; Teams from your Uno account need a newer Uno Work. Until then, add your calendar by its link below.</p>`;
+    return `<p class="fine">Google Calendar and Outlook connect in one click on a newer Uno Work. Until then, add your calendar by its link.</p>`;
   }
   const sw = withSwitch ? `<label class="check"><input type="checkbox" name="uno_calendars" ${STATE.settings.uno_calendars !== false ? "checked" : ""}> <span><b>Use calendars from my Uno account</b><br><span class="muted small">The ones you connected in Uno Work. Nothing to paste.</span></span></label>` : "";
   const asst = u.assistant ? `<p class="fine" style="margin-top:8px">Your assistant in Uno Work uses these calendars to join your calls. Turn that off in Uno Work → the assistant → Join my calls.</p>` : "";
   const off = !withSwitch && !u.enabled && !u.assistant ? `<p class="fine" style="margin-top:8px">Turned off in Settings → Calendars.</p>` : "";
-  return `${head}${sw}<ul class="cals ucals">${unoRows(u)}</ul>${asst}${off}`;
+  return `<ul class="cals ucals">${unoRows(u)}</ul>${sw}${asst}${off}`;
 }
 
 function icalList(cals) {
@@ -462,6 +464,7 @@ function connectUno(provider, rerender) {
 
 function bindCalendarRows(root, rerender) {
   $$("[data-uno-connect]", root).forEach((b) => b.onclick = () => connectUno(b.dataset.unoConnect, rerender));
+  $$("[data-cal-add]", root).forEach((b) => b.onclick = openCalendarDialog);
   $$("[data-cal-del]", root).forEach((b) => b.onclick = async () => {
     if (!confirm("Remove this calendar? The bot stops joining its calls.")) return;
     try { await api(`/api/calendars/${b.dataset.calDel}`, { method: "DELETE" }); } catch (e) { toast(e.message, "bad"); }
@@ -481,12 +484,16 @@ async function renderCalendarBox(uno) {
   const checked = keep ? keep.checked : null;
   const typed = $("#cal-box-url") ? $("#cal-box-url").value : "";
   const openHowto = $$("details.howto[open] summary", box).map((x) => x.textContent);
+  const was = $("details.cal-other", box);
+  const openOther = was ? was.open : calBoxData.calendars.some((c) => c.kind !== "uno");
   box.innerHTML = `${unoBlock(calBoxData.uno, true)}
-    <p class="sub">Other calendars (iCal link)</p>
-    <p class="fine">Yandex, iCloud, Zoho or any other calendar: paste its secret iCal address. Notetaker reads it every few minutes; it's read-only, and you can reset the address in your calendar any time.</p>
-    ${icalList(calBoxData.calendars)}
-    <div class="row-btns"><input id="cal-box-url" placeholder="https://… or webcal://…" autocomplete="off"><button type="button" class="btn" id="cal-box-add">Add</button></div>
-    <div class="howto-list">${howtoHtml()}</div>`;
+    <details class="more cal-other" ${openOther ? "open" : ""}>
+      <summary>Other calendars, by link</summary>
+      <p class="fine">Yandex, iCloud, Zoho or any other calendar: paste its secret iCal address. Notetaker reads it every few minutes; it's read-only, and you can reset the address in your calendar any time.</p>
+      ${icalList(calBoxData.calendars)}
+      <div class="row-btns"><input id="cal-box-url" placeholder="https://… or webcal://…" autocomplete="off"><button type="button" class="btn" id="cal-box-add">Add</button></div>
+      <div class="howto-list">${howtoHtml()}</div>
+    </details>`;
   if (checked !== null && box.querySelector('[name="uno_calendars"]')) box.querySelector('[name="uno_calendars"]').checked = checked;
   $("#cal-box-url").value = typed;
   $$("details.howto summary", box).forEach((x) => { if (openHowto.includes(x.textContent)) x.parentElement.open = true; });
@@ -507,6 +514,45 @@ async function renderCalendarBox(uno) {
   $("#cal-box-add").onclick = add;
   $("#cal-box-url").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
   bindCalendarRows(box, (u) => { if ($("#dlg-settings").open) renderCalendarBox(u); });  // null: read it all again
+}
+
+// ---- calendars: a page of its own ------------------------------------------------
+
+async function showCalendars() {
+  current = null; view = "calendars";
+  clearInterval(pollTimer);
+  setView("detail");
+  await renderCalendars();
+  loadList();
+}
+
+async function renderCalendars(uno) {
+  let d;
+  try { d = await api("/api/calendars"); }
+  catch (e) { $("#main").innerHTML = `<section class="page"><h1>Calendars</h1><p class="bad">${esc(e.message)}</p></section>`; return; }
+  if (view !== "calendars") return;
+  if (uno) d.uno = uno;
+  const any = d.calendars.length > 0;
+  const ical = icalList(d.calendars);
+  $("#main").innerHTML = `
+    <section class="page calendars">
+      <a href="#/" class="back only-phone">${ic("back")} Meetings</a>
+      <header class="page-head">
+        <h1>Calendars</h1>
+        ${any ? `<button class="btn" id="btn-cal-refresh">${ic("refresh")} Check now</button>` : ""}
+      </header>
+      <p class="muted page-lead">${any ? `${esc(joinRule(d))} · <button class="link" id="cal-rule">Change</button>` : "Connect a calendar and the notetaker joins its calls by itself. You get the notes after each call."}</p>
+      <div class="cal-box">${unoBlock(d.uno, false)}</div>
+      <div class="sec">
+        <div class="sec-head"><h2>Other calendars</h2></div>
+        ${ical ? `<div class="cal-box">${ical}</div>` : `<p class="muted">Yandex, iCloud, Zoho or any calendar with an iCal link.</p>`}
+        <div class="row-btns"><button class="btn" id="btn-cal-add">${ic("plus")} Add a calendar by link</button></div>
+      </div>
+    </section>`;
+  $("#btn-cal-add").onclick = openCalendarDialog;
+  if ($("#cal-rule")) $("#cal-rule").onclick = () => openSettings("set-bot");
+  if ($("#btn-cal-refresh")) $("#btn-cal-refresh").onclick = async (e) => { e.currentTarget.disabled = true; try { await api("/api/calendars/refresh", { method: "POST" }); } catch (err) { toast(err.message, "bad"); } renderCalendars(); };
+  bindCalendarRows($("#main"), (u) => { if (view === "calendars") renderCalendars(u); });
 }
 
 async function showCalls() {
@@ -543,8 +589,6 @@ async function renderCalls() {
     </div>`).join("");
   const upcoming = d.upcoming.filter((e) => e.url);
   const noLink = d.upcoming.filter((e) => !e.url && new Date(e.end) > new Date()).length;
-  const uno = unoBlock(d.uno, false);
-  const ical = icalList(d.calendars);
   const recent = d.recent.map((x) => `<div class="ev past">
       <span class="ev-time">${fmtTime(new Date(x.created_at * 1000).toISOString())}<span class="ev-end">${esc(dayLabel(new Date(x.created_at * 1000).toISOString()))}</span></span>
       <span class="ev-title"><span class="ev-name">${esc(x.title || "Call")}</span><span class="ev-sub">${platformTag(x.platform)}<span>·</span><span class="st st-${x.status}">${esc(CALL_STATUS[x.status] || x.status)}</span>${x.detail ? `<span>· ${esc(x.detail)}</span>` : ""}
@@ -562,22 +606,18 @@ async function renderCalls() {
       ${asst ? `<p class="fine">Your assistant <b>${esc(asst.assistant || "")}</b> in Uno Work sends this notetaker to your calls. The notes go to it, your Inbox and Telegram. Turn it off in Uno Work → the assistant → Join my calls.</p>` : ""}
       ${active ? `<div class="sec"><div class="sec-head"><h2>Now</h2></div><div class="panel">${active}</div></div>` : ""}
       <div class="sec">
-        <div class="sec-head"><h2>Coming up</h2>${d.calendars.length ? `<span class="aside">${esc(joinRule(d))} · <button class="link small" id="calls-settings">Change</button></span>` : ""}</div>
+        <div class="sec-head"><h2>Coming up</h2>${d.calendars.length ? `<span class="aside">${esc(joinRule(d))} · <button class="link small" id="calls-settings">Change</button> · <a href="#/calendars">Calendars</a></span>` : ""}</div>
         ${d.calendars.length ? (upcoming.length ? `<div class="panel">${eventRows(upcoming)}</div>` : `<div class="panel"><div class="row muted">${ic("calendar")} No calls with a link in the next 7 days.</div></div>`)
           + (noLink ? `<p class="fine" style="margin-top:8px">${plural(noLink, "event")} without a call link — nowhere to join.</p>` : "")
           : connectPanel(d.uno)}
       </div>
-      ${d.calendars.length || uno ? `<div class="sec"><div class="sec-head"><h2>Calendars</h2><span class="aside"><button class="link small" id="btn-cal-refresh">${ic("refresh")} Check now</button></span></div>
-        <div class="cal-box">${uno}${ical ? `<p class="sub">By link</p>${ical}` : ""}</div>
-        <div class="row-btns"><button class="btn sm" id="btn-cal-add">${ic("plus")} Add a calendar by link</button></div></div>` : ""}
       ${recent ? `<div class="sec"><div class="sec-head"><h2>Recent</h2></div><div class="panel">${recent}</div></div>` : ""}
       <p class="fine" style="margin-top:28px">It joins as a guest, so the host may have to let it in. It leaves when the call ends, when everyone else has left or after a long silence. KakaoTalk group calls have no link to open in a browser, so it can't join those.</p>
     </section>`;
   $("#btn-send-bot").onclick = openBotDialog;
-  for (const id of ["#btn-cal-add", "#home-cal-link"]) if ($(id)) $(id).onclick = openCalendarDialog;
+  if ($("#home-cal-link")) $("#home-cal-link").onclick = openCalendarDialog;
   if ($("#home-send-bot")) $("#home-send-bot").onclick = openBotDialog;
   if ($("#calls-settings")) $("#calls-settings").onclick = () => openSettings("set-bot");
-  if ($("#btn-cal-refresh")) $("#btn-cal-refresh").onclick = async (e) => { e.currentTarget.disabled = true; try { await api("/api/calendars/refresh", { method: "POST" }); } catch (err) { toast(err.message, "bad"); } renderCalls(); };
   $$("[data-stop]").forEach((b) => b.onclick = async () => { b.disabled = true; try { await api(`/api/calls/sessions/${b.dataset.stop}/stop`, { method: "POST" }); } catch (e) { toast(e.message, "bad"); } renderCalls(); });
   bindCalendarRows($("#main"), () => { if (view === "calls") renderCalls(); });
   bindEventSwitches($("#main"), renderCalls);
@@ -607,12 +647,18 @@ $("#dlg-calendar").addEventListener("close", async () => {
     toast(`Connected${r.name ? ` “${r.name}”` : ""} — ${plural(r.events, "event")} this week`);
     await loadState();
   } catch (e) { toast(e.message, "bad"); }
+  if ($("#dlg-settings").open) { calBoxData = null; renderCalendarBox(); }
   if (view === "calls") renderCalls();
+  else if (view === "calendars") renderCalendars();
+  else renderComingUp();
 });
 
 function liveCalls() {
   const n = STATE && STATE.bot ? STATE.bot.running : 0;
   $("#calls-live").textContent = n ? `● ${n}` : "";
+  const cals = STATE ? STATE.calendars : 0;
+  $("#cal-count").textContent = cals ? String(cals) : "Connect";
+  $("#cal-count").classList.toggle("todo", !cals);
 }
 async function refreshBot() {
   const s = await api("/api/state").catch(() => null);
@@ -1383,6 +1429,7 @@ function route() {
   if ((m = h.match(/^#\/m\/([a-z0-9]{10})(?:\/t\/(\d+))?$/))) openMeeting(m[1], m[2] !== undefined ? Number(m[2]) : null);
   else if (h === "#/actions") showActions();
   else if (h === "#/calls") showCalls();
+  else if (h === "#/calendars") showCalendars();
   else if (h === "#/share") takeSharedFile();
   else if (h === "#/share-missed") { history.replaceState(null, "", "#/"); showHome(); toast("Open Notetaker once from the Home Screen, then share the recording again.", "bad"); }
   else showHome();

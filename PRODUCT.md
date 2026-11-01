@@ -22,7 +22,7 @@ Success: the person opens it, immediately sees their meetings and what's next, r
 
 ## Capabilities to preserve
 
-Meetings list with search across all meetings; meeting page (notes, transcript with timestamps and speakers, rename speaker, talk time, audio, rewrite notes by kind, Ask, share, delete); Action items view across meetings (checkboxes, Ask Uno to do it); Calls (bot status, upcoming calls with per-call switch, recent calls with what happened / what the bot saw, send the bot by link); Record (call in another tab with consent line / mic only), Upload; Settings (notifications Inbox/Telegram, Telegram pairing, calendars from Uno account + iCal with guides, bot rules and name, AI provider and speech-to-text, defaults); Home widget; phone layout with record/upload bar; login page; public share page.
+Meetings list with search across all meetings; meeting page (notes, transcript with timestamps and speakers, rename speaker, talk time, audio, rewrite notes by kind, Ask, share, delete); Action items view across meetings (checkboxes, Ask Uno to do it); Calls (bot status, upcoming calls with per-call switch, recent calls with what happened / what the bot saw, send the bot by link); Calendars, a page of its own in the sidebar with "Connect" until one is connected (Google and Outlook first, others by link); Record (call in another tab with consent line / mic only), Upload; Settings (notifications Inbox/Telegram, Telegram pairing, calendars from Uno account + iCal with guides, bot rules and name, AI provider and speech-to-text, defaults); Home widget; phone layout with record/upload bar; login page; public share page.
 
 ## Decisions (Misha, 30.10.2026)
 

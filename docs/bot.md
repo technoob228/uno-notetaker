@@ -126,10 +126,10 @@ Inbox, Telegram. Контракт с Work: `reports/day_2026-10-28/assistants-d-
 
 ## Календари из аккаунта Uno, без ассистента (0.7.0, 29.10.2026)
 
-Что видит человек: открыл Notetaker → Calls или Settings → Calendars → блок **From your Uno account**.
+Что видит человек: открыл Notetaker → **Calendars** в левом меню (там же «Connect», пока ничего не подключено) или Settings → Calendars.
 Google Calendar (коннектор «Gmail & Calendar») и **Outlook & Teams** (новый коннектор `microsoft`)
 показаны строками: «Connected · адрес», «Not connected» + **Connect**, «Sign in again» + кнопка,
-«Not available yet» (консоль коннектор не предлагает). Подключено — работает само, вставлять ничего не
+«Add it by link for now» с кнопкой Add by link (консоль коннектор не предлагает). Подключено — работает само, вставлять ничего не
 надо, ассистент не нужен. Переключатель **Use calendars from my Uno account** (по умолчанию включён)
 выключает их. Ниже — **Other calendars (iCal link)**: поле для секретной ссылки и короткие шаги по
 каждому сервису (свёрнуты): Google (если не через Uno), Outlook.com / Microsoft 365, Яндекс, iCloud, Zoho.

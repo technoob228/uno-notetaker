@@ -2,6 +2,9 @@
 
 Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
 
+- **Calendars in plain sight** (0.8.1): their own page in the sidebar, with
+  "Connect" next to it until one is connected. Google and Outlook first, others
+  by link.
 - **A new look** (0.8.0): one calm library like Granola. Meetings by day on
   the left with a short summary line, the notes as a clean document (action
   items on top, a floating player, Notes / Transcript / Ask), one **New
@@ -14,7 +17,7 @@ Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
   the app and `docs/bot.md`.
 - **Calendars from your Uno account** (0.7.0): Google Calendar and Outlook &
   Teams connected in Uno Work are used as they are — nothing to paste, no
-  assistant needed (Settings → Calendars → "From your Uno account"; **Connect**
+  assistant needed (**Calendars** in the sidebar; **Connect**
   opens Uno Work's own Connect). Any other calendar — Yandex, iCloud, Zoho,
   Outlook without Uno — by its secret iCal address, with step-by-step
   instructions per service in the app. The same meeting in two calendars gets
