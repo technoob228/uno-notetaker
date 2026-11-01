@@ -206,9 +206,15 @@ class AssistantCalls(unittest.TestCase):
 
     # ---- the same call once ----
 
+    def test_google_refusal_is_not_a_waiting_room(self):
+        detail = "Turned away for 15 min, it never got to ask to join (Google Meet: You can't join this video call)"
+        self.assertEqual(assistant.reason_of("failed", detail), "turned_away")
+        self.assertEqual(assistant.reason_of("not_admitted", "Nobody let the bot in within 15 min"), "waiting_room")
+
     def test_canonical_links(self):
         c = calendars.canonical
         self.assertEqual(c("https://meet.google.com/abc-defg-hij?authuser=1&hl=en"), c("https://meet.google.com/abc-defg-hij"))
+        self.assertEqual(c("https://meet.google.com/meet/abc-defg-hij?authuser=0"), c("https://meet.google.com/abc-defg-hij"))
         self.assertEqual(c("https://us02web.zoom.us/j/123456789?pwd=x"), c("https://app.zoom.us/wc/join/123456789"))
         self.assertNotEqual(c("https://meet.google.com/abc-defg-hij"), c("https://meet.google.com/abc-defg-hik"))
 

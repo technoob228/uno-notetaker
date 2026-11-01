@@ -250,6 +250,7 @@ REASONS = [
     # The bot's "couldn't find the join button" carries a dump of the page — classify it
     # before anything else, or a "Sign in" link on the page reads as sign-in-required.
     ("no_join_button", re.compile(r"(?i)^could not find how to join")),
+    ("turned_away", re.compile(r"(?i)can't join this (video )?call")),
     ("waiting_room", re.compile(r"(?i)nobody let|let you in|no one responded|waiting room|lobby")),
     ("denied", re.compile(r"(?i)denied|declined|removed|не впустил|отклонил")),
     ("sign_in_required", re.compile(r"(?i)sign in to join|signed-in|войдите|log in to join")),
@@ -287,6 +288,7 @@ def status_text(x: dict, bot: str) -> str:
     if status == "done":
         return f"{bot} left {title} — notes are on the way"
     texts = {
+        "turned_away": f"Couldn't join {title}: Google Meet turned {bot} away before it could ask to join",
         "waiting_room": f"Couldn't join {title}: waiting room — nobody let {bot} in",
         "denied": f"Couldn't join {title}: the host didn't let {bot} in",
         "sign_in_required": f"Couldn't join {title}: the call only lets signed-in people in",

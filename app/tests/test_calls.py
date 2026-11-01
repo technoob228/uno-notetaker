@@ -67,6 +67,7 @@ class Links(unittest.TestCase):
     def test_every_platform(self):
         cases = {
             "Join with Google Meet: https://meet.google.com/abc-defg-hij": ("meet", "https://meet.google.com/abc-defg-hij"),
+            "https://meet.google.com/meet/abc-defg-hij?authuser=0": ("meet", "https://meet.google.com/meet/abc-defg-hij?authuser=0"),
             "Zoom: https://us02web.zoom.us/j/81234567890?pwd=AbC.1 ID: 812": ("zoom", "https://us02web.zoom.us/j/81234567890?pwd=AbC.1"),
             "<https://teams.microsoft.com/l/meetup-join/19%3ameeting_X%40thread.v2/0?context=%7b%22Tid%22%3a%22a%22%7d>":
                 ("teams", "https://teams.microsoft.com/l/meetup-join/19%3ameeting_X%40thread.v2/0?context=%7b%22Tid%22%3a%22a%22%7d"),

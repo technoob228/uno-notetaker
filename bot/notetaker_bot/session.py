@@ -177,9 +177,9 @@ class Session:
                     raise
                 tries += 1
                 if time.time() + NOT_STARTED_RETRY_S > give_up:
-                    raise Refused("not_admitted",
-                                  f"Nobody started the call or let the bot in within {wait_s // 60} min "
-                                  f"({r.detail})") from None
+                    # Nobody saw a request: the platform refused the bot before it could ask.
+                    raise Refused("failed", f"Turned away for {wait_s // 60} min, it never got to ask to join "
+                                            f"({r.detail})") from None
                 log.info("[%s] not started yet (%s) — try %d again in %ds", self.id, r.detail, tries,
                          NOT_STARTED_RETRY_S)
                 await self.report("lobby", "Waiting for someone to start the call…")

@@ -47,6 +47,10 @@ class Spec:
 
 class Meet(Spec):
     def url(self, url: str) -> str:
+        """The plain guest link: /meet/<code> opens Meet's landing page, ?authuser= means nothing to a guest."""
+        m = re.search(r"([a-z]{3}-[a-z]{4}-[a-z]{3})", urlparse(url).path, re.I)
+        if m:
+            return f"https://meet.google.com/{m.group(1).lower()}?hl=en"
         return url + ("&" if "?" in url else "?") + "hl=en"
 
 

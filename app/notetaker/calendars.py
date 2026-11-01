@@ -76,7 +76,7 @@ MAX_CALENDARS = 10
 # Call links, most specific first. Trailing punctuation and markup are cut off
 # afterwards (descriptions are often HTML or "<https://…>").
 LINK_PATTERNS = [
-    ("meet", re.compile(r"https://meet\.google\.com/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:\?[^\s\"'<>]*)?", re.I)),
+    ("meet", re.compile(r"https://meet\.google\.com/(?:meet/)?[a-z]{3}-[a-z]{4}-[a-z]{3}(?:\?[^\s\"'<>]*)?", re.I)),
     ("zoom", re.compile(r"https://(?:[\w-]+\.)?zoom(?:gov)?\.(?:us|com)/(?:j|w|s|my|wc/join)/[^\s\"'<>]+", re.I)),
     ("teams", re.compile(r"https://teams\.(?:microsoft|live)\.com/(?:l/meetup-join|meet|v2/\?meetingjoin)[^\s\"'<>]+", re.I)),
     ("telemost", re.compile(r"https://telemost\.(?:360\.)?yandex\.(?:ru|com|com\.tr|kz|by|uz)/j/[^\s\"'<>]+", re.I)),
@@ -527,7 +527,7 @@ def canonical(url: str) -> str:
     """One string per call, whatever form the link came in (Meet with
     ?authuser=, Zoom's /j/ vs /wc/join/ and its subdomains)."""
     u = (url or "").strip()
-    m = re.search(r"meet\.google\.com/([a-z]{3}-[a-z]{4}-[a-z]{3})", u, re.I)
+    m = re.search(r"meet\.google\.com/(?:meet/)?([a-z]{3}-[a-z]{4}-[a-z]{3})", u, re.I)
     if m:
         return "meet:" + m.group(1).lower()
     m = re.search(r"zoom(?:gov)?\.(?:us|com)/(?:j|w|s|wc/join|wc)/(\d{9,12})", u, re.I)
