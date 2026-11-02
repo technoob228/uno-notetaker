@@ -158,9 +158,16 @@ class Session:
                                              extra_http_headers={"Accept-Language": "en-US,en;q=0.9"})
         await ctx.add_init_script(INIT_JS)
         self.page = await ctx.new_page()
+        self.page.on("response", self._note_refusal)
         url = self.spec.url(self.job["url"])
         log.info("[%s] opening %s", self.id, url)
         await self.page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+
+    def _note_refusal(self, r) -> None:
+        """The page only says "can't join"; the server's answer says which request it refused."""
+        if r.status in (401, 403) and "$rpc" in r.url:
+            log.warning("[%s] %s refused %s: HTTP %d", self.id, self.spec.name,
+                        r.url.split("?")[0].rsplit("/", 1)[-1], r.status)
 
     async def _join_retrying(self) -> None:
         """The bot comes at the start; the host is often a minute late, and Meet turns
