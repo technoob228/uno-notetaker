@@ -180,3 +180,11 @@ Google Calendar (коннектор «Gmail & Calendar») и **Outlook & Teams**
 Тесты: `app/tests/test_uno_calendars.py` (фейковый App API: список → виртуальные календари, параметр
 `provider`, 404, 424, `needsReconnect`, ключи Microsoft, дубликаты Google+iCal и Google+Outlook, удаление в
 Outlook, переключатель, без ассистента / с ассистентом).
+
+## Google Meet выставляет бота (0.8.2, 01.11.2026)
+
+Экран «You can't join this video call» после Ask to join: сервер Google отвечает 403 на
+`MeetingDeviceService/CreateMeetingDevice`, запрос на вход хосту не приходит. Причина ещё не найдена:
+имя бота, настройка хоста Anyone with the meeting link can ask to join, адрес облачной машины,
+анонимный гость. Настоящий Chrome 156 на пустом звонке получил такой же 403. Бот пишет отказ в свой
+журнал (`refused ...: HTTP 403`), человеку показывается «Google Meet turned ... away» (reason `turned_away`).

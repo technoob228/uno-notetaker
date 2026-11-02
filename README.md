@@ -2,6 +2,9 @@
 
 Meeting notes for your Uno computer — a small, self-hosted Granola / Otter.
 
+- **Plain words when Google refuses** (0.8.2): if Google Meet turns the bot away
+  before it can ask to join, the notetaker says so instead of "nobody let it in".
+  Links like `meet.google.com/meet/<code>` work too.
 - **Calendars in plain sight** (0.8.1): their own page in the sidebar, with
   "Connect" next to it until one is connected. Google and Outlook first, others
   by link.
